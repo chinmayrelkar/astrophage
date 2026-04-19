@@ -1,13 +1,10 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import { getClient } from "../client.js"
+import { getClient, promptAndWait } from "../client.js"
 import type { Patch, ReviewVerdict } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 import { constitutionPrompt } from "../constitution.js"
 
 // ─── Reviewer Agent ───────────────────────────────────────────────────────────
-//
-// Reviews a proposed patch against the constitution.
-// Returns a structured ReviewVerdict via json_schema format.
 
 async function getOc(): Promise<OpencodeClient> {
   return getClient()
@@ -18,13 +15,10 @@ let _sessionID: string | null = null
 async function ensureSession(): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    const res = await oc.session.create({
-      title: "Astrophage Reviewer",
-    })
+    const res = await oc.session.create({ title: "Astrophage Reviewer" })
     _sessionID = res.data!.id
 
-    // Inject constitution once as system context
-    await oc.session.prompt({
+    await promptAndWait(oc, {
       sessionID: _sessionID,
       noReply: true,
       parts: [
@@ -49,7 +43,6 @@ When reviewing, respond with a JSON object in EXACTLY this format — no other t
   return _sessionID
 }
 
-/** Review a patch. Returns a structured verdict. */
 export async function reviewPatch(patch: Patch, round: number): Promise<ReviewVerdict> {
   const oc = await getOc()
   const sessionID = await ensureSession()
@@ -74,7 +67,7 @@ ${patch.proposedCode}
 
 Apply the constitution and return your verdict as JSON.`
 
-  const result = await oc.session.prompt({
+  const result = await promptAndWait(oc, {
     sessionID,
     parts: [{ type: "text", text: prompt }],
     format: {
@@ -84,57 +77,41 @@ Apply the constitution and return your verdict as JSON.`
         properties: {
           decision: { type: "string", enum: ["accept", "reject"] },
           reason: { type: "string", description: "Clear explanation of the verdict" },
-          violatedRule: {
-            type: "string",
-            description: "Exact rule text if rejecting (omit if accepting)",
-          },
-          nonNegotiable: {
-            type: "boolean",
-            description: "Whether the violated rule is non-negotiable",
-          },
+          violatedRule: { type: "string", description: "Exact rule text if rejecting" },
+          nonNegotiable: { type: "boolean", description: "Whether the violated rule is non-negotiable" },
         },
         required: ["decision", "reason", "nonNegotiable"],
       },
     },
   })
 
-  const verdict = parseVerdict(result.data, round)
+  const verdict = parseVerdict(result, round)
 
-  const label =
-    verdict.decision === "accept"
-      ? `ACCEPT — ${verdict.reason}`
-      : `REJECT${verdict.nonNegotiable ? " [NON-NEGOTIABLE]" : ""} — ${verdict.reason}`
+  const label = verdict.decision === "accept"
+    ? `ACCEPT — ${verdict.reason}`
+    : `REJECT${verdict.nonNegotiable ? " [NON-NEGOTIABLE]" : ""} — ${verdict.reason}`
 
   agentTurn("reviewer", `Verdict: ${verdict.decision.toUpperCase()}`, label, round)
   emit("reviewer", "verdict", JSON.stringify(verdict), round)
-
   return verdict
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function parseVerdict(data: any, round: number): ReviewVerdict {
-  // v2 SDK: structured output lives at info.structured
-  const structured = data?.info?.structured
-  if (structured && typeof structured === "object") {
+function parseVerdict(result: { text: string; structured: unknown }, round: number): ReviewVerdict {
+  // Prefer structured output
+  if (result.structured && typeof result.structured === "object") {
+    const s = result.structured as Record<string, unknown>
     return {
-      decision: structured.decision ?? "reject",
-      reason: structured.reason ?? "No reason provided",
-      violatedRule: structured.violatedRule,
-      nonNegotiable: structured.nonNegotiable ?? false,
+      decision: (s["decision"] as "accept" | "reject") ?? "reject",
+      reason: (s["reason"] as string) ?? "No reason provided",
+      violatedRule: s["violatedRule"] as string | undefined,
+      nonNegotiable: (s["nonNegotiable"] as boolean) ?? false,
       round,
     }
   }
 
-  // Fallback: parse text parts as JSON
-  const parts: any[] = data?.parts ?? []
-  const raw = parts
-    .filter((p) => p.type === "text")
-    .map((p) => p.text ?? "")
-    .join("")
-
+  // Fallback: parse text as JSON
   try {
-    const parsed = JSON.parse(raw.trim())
+    const parsed = JSON.parse(result.text.trim())
     return {
       decision: parsed.decision ?? "reject",
       reason: parsed.reason ?? "No reason provided",
@@ -145,7 +122,7 @@ function parseVerdict(data: any, round: number): ReviewVerdict {
   } catch {
     return {
       decision: "reject",
-      reason: `Could not parse reviewer response: ${raw.slice(0, 200)}`,
+      reason: `Could not parse reviewer response: ${result.text.slice(0, 200)}`,
       nonNegotiable: false,
       round,
     }
