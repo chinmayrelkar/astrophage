@@ -59,6 +59,25 @@ export interface Task {
   repo: RepoContext
 }
 
+// ─── PM plan produced by Stratt ──────────────────────────────────────────────
+
+export interface PMSubtask {
+  id: string
+  description: string
+  assignee: "coder" | "tester" | "reviewer"
+  acceptanceCriteria: string
+}
+
+export interface PMPlan {
+  subtasks: PMSubtask[]
+  /** How many coder → tester → reviewer rounds to allow (overrides MAX_ROUNDS) */
+  maxRounds: number
+  /** What the coder should focus on (injected into coder prompt) */
+  focusAreas: string[]
+  /** What the reviewer should scrutinise (injected into reviewer prompt) */
+  riskFlags: string[]
+}
+
 // ─── Spec produced by PM + Architect ─────────────────────────────────────────
 
 export interface Spec {

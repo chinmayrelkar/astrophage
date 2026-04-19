@@ -66,7 +66,14 @@ export interface PRInfo {
   patch: Patch
 }
 
-export async function proposeAndOpenPR(task: Task, round: number): Promise<PRInfo> {
+export interface CoderContext {
+  /** Focus areas from the PM plan — injected into the coder prompt */
+  focusAreas?: string[]
+  /** Acceptance criteria from the PM plan — what the fix must achieve */
+  acceptanceCriteria?: string[]
+}
+
+export async function proposeAndOpenPR(task: Task, round: number, ctx: CoderContext = {}): Promise<PRInfo> {
   const oc = await getOc()
   const sessionID = await ensureSession(task.repo)
 
@@ -74,12 +81,15 @@ export async function proposeAndOpenPR(task: Task, round: number): Promise<PRInf
   emit("coder", "git_action", `Branch created, committing fix...`, round)
   console.log(`\n[CODER] Starting round ${round} — will explore, fix, and open PR`)
 
+  // Build optional PM guidance block
+  const pmGuidance = buildPMGuidance(ctx)
+
   const prompt = `Here is your task:
 
 ## ${task.title}
 
 ${task.description}
-
+${pmGuidance}
 Do the following steps IN ORDER. Run each bash command and show the output.
 
 STEP 1 — Explore the repo at ${task.repo.localPath} to find the bug. Read relevant files.
@@ -184,6 +194,20 @@ Do NOT open a new PR. Do NOT change the branch name. Update PR #${pr.number} onl
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildPMGuidance(ctx: CoderContext): string {
+  const parts: string[] = []
+
+  if (ctx.focusAreas && ctx.focusAreas.length > 0) {
+    parts.push(`\n## PM Focus Areas\nThe project manager has identified these priorities for this fix:\n${ctx.focusAreas.map((a) => `- ${a}`).join("\n")}\n`)
+  }
+
+  if (ctx.acceptanceCriteria && ctx.acceptanceCriteria.length > 0) {
+    parts.push(`\n## Acceptance Criteria\nYour fix must satisfy these criteria:\n${ctx.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`)
+  }
+
+  return parts.join("")
+}
 
 function parseCoderResponse(raw: string, fallbackFile: string): Patch {
   const explanationMatch = raw.match(/EXPLANATION:\s*(.+?)(?=FILE:|$)/s)
