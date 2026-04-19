@@ -4,23 +4,32 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 // ─── Model ────────────────────────────────────────────────────────────────────
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
 
-// ─── Shared OpenCode client ───────────────────────────────────────────────────
-// Points at the bawarchi repo so agents can read/edit its files directly.
-//
-// Reuses the existing OpenCode server if one is running and responding with
-// JSON (i.e. it's the API server, not the TUI web app which returns HTML).
-// Falls back to spawning a dedicated server on port 4097.
-
+// ─── Directory ────────────────────────────────────────────────────────────────
+// All agent sessions point at the bawarchi repo so the model can read its files.
 const DIR = "/home/ubuntu/bawarchi"
+
+// ─── Shared OpenCode client ───────────────────────────────────────────────────
+//
+// The OpenCode TUI at port 4096 IS the API server — it routes requests to
+// per-directory worker instances via the x-opencode-directory header.
+// The v2 SDK's createOpencodeClient handles that header via the `directory` option.
+//
+// We probe by creating a session and immediately deleting it — if it returns
+// a valid session ID the server is live and routing correctly.
+// Only fall back to spawning a new server if the TUI is not available.
 
 let _client: OpencodeClient | null = null
 let _serverClose: (() => void) | null = null
 
-async function probeApiServer(url: string): Promise<boolean> {
+async function probeServer(baseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`${url}/v2/app`, { signal: AbortSignal.timeout(1500) })
-    const ct = res.headers.get("content-type") ?? ""
-    return ct.includes("application/json")
+    const client = createOpencodeClient({ baseUrl, directory: DIR })
+    const res = await client.session.create({ title: "astrophage-probe" })
+    const id = res.data?.id
+    if (!id) return false
+    // Clean up immediately
+    await client.session.delete({ sessionID: id }).catch(() => {})
+    return true
   } catch {
     return false
   }
@@ -29,24 +38,24 @@ async function probeApiServer(url: string): Promise<boolean> {
 export async function getClient(): Promise<OpencodeClient> {
   if (_client) return _client
 
-  // 1. Check env var set by opencode TUI
+  // 1. OPENCODE_SERVER_URL injected by the TUI when running inside opencode
   const envURL = process.env["OPENCODE_SERVER_URL"]
-  if (envURL && await probeApiServer(envURL)) {
-    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${envURL}`)
+  if (envURL) {
+    console.log(`[ASTROPHAGE] Using OPENCODE_SERVER_URL: ${envURL}`)
     _client = createOpencodeClient({ baseUrl: envURL, directory: DIR })
     return _client
   }
 
-  // 2. Probe default port — but only accept if it responds with JSON
-  const defaultURL = "http://127.0.0.1:4096"
-  if (await probeApiServer(defaultURL)) {
-    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${defaultURL}`)
-    _client = createOpencodeClient({ baseUrl: defaultURL, directory: DIR })
+  // 2. TUI default port — probe with an actual session create/delete
+  const tuiURL = "http://127.0.0.1:4096"
+  if (await probeServer(tuiURL)) {
+    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${tuiURL}`)
+    _client = createOpencodeClient({ baseUrl: tuiURL, directory: DIR })
     return _client
   }
 
-  // 3. Spawn dedicated server on 4097 (TUI is on 4096, won't conflict)
-  console.log(`[ASTROPHAGE] Starting dedicated OpenCode server (dir: ${DIR})...`)
+  // 3. Spawn a dedicated server (TUI not available)
+  console.log(`[ASTROPHAGE] No existing server found — spawning on port 4097...`)
   const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 4097 })
   _serverClose = server.close
   console.log(`[ASTROPHAGE] OpenCode server ready at ${server.url}`)
@@ -55,15 +64,16 @@ export async function getClient(): Promise<OpencodeClient> {
 }
 
 export function closeServer() {
+  // Only close if we spawned it — don't shut down the user's TUI
   _serverClose?.()
   _serverClose = null
   _client = null
 }
 
 // ─── promptAndWait ────────────────────────────────────────────────────────────
-// Fires session.prompt then polls session.messages until the assistant message
-// appears. Avoids SSE timing race where session.idle fires before the stream
-// consumer is connected.
+// Fires session.prompt then polls session.messages until the new assistant
+// message appears. Polling avoids the SSE race where session.idle fires before
+// the stream consumer connects.
 
 export interface PromptParams {
   sessionID: string
@@ -90,11 +100,11 @@ export async function promptAndWait(
     return { text: "", structured: null }
   }
 
-  // Get message count before prompt so we know when a new one appears
+  // Count messages before so we know when a new one arrives
   const before = await client.session.messages({ sessionID: params.sessionID, limit: 20 })
   const beforeCount = (before.data ?? []).length
 
-  // Fire the prompt
+  // Fire prompt
   await client.session.prompt({
     sessionID: params.sessionID,
     parts: params.parts,
@@ -102,10 +112,10 @@ export async function promptAndWait(
     ...(params.format ? { format: params.format } : {}),
   })
 
-  // Poll until a new assistant message appears (completed = has text parts)
+  // Poll until a completed assistant message appears
   process.stdout.write(`  [waiting for model`)
   const POLL_MS = 500
-  const TIMEOUT_MS = 120_000
+  const TIMEOUT_MS = 180_000
   const start = Date.now()
 
   while (Date.now() - start < TIMEOUT_MS) {
@@ -116,7 +126,6 @@ export async function promptAndWait(
     const messages = res.data ?? []
 
     if (messages.length > beforeCount) {
-      // Find the last assistant message with text content
       const last = [...messages].reverse().find(
         (m: { info: { role: string }; parts: unknown[] }) => {
           if (m.info.role !== "assistant") return false
