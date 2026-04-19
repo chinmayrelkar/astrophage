@@ -1,13 +1,20 @@
 /**
- * Pipeline runner — PR-driven flow:
+ * Pipeline runner — PM-driven PR flow:
  *
- * 1. Coder explores repo, fixes bug, opens PR
- * 2. Reviewer reads PR diff on GitHub, posts review comment, returns verdict
- * 3. If rejected → coder reads PR comments, updates code, force-pushes → loop
- * 4. If accepted → reviewer approves + merges PR
- * 5. Exit when accepted or max rounds hit
+ * 0. PM (Stratt) analyses the task and produces a dynamic plan
+ *    (maxRounds, focusAreas, riskFlags, acceptanceCriteria)
+ * 1. Architect (Ilyukhina) derives file contracts and test hints from the plan
+ * 2. Coder explores repo, fixes bug, opens PR — guided by PM focusAreas
+ * 3. Tester writes & runs tests — guided by PM acceptanceCriteria + Architect testHints
+ * 4. Reviewer reads PR diff on GitHub, posts review, returns verdict
+ *    — guided by PM riskFlags
+ * 5. If rejected → coder reads PR comments, updates code, force-pushes → loop
+ * 6. If accepted → reviewer approves + merges PR
+ * 7. Exit when accepted or plan.maxRounds hit (not a hardcoded constant)
  */
 
+import { planTask, closePMSession, resetPMSession } from "./agents/pm.js"
+import { deriveContracts, closeArchitectSession, resetArchitectSession } from "./agents/architect.js"
 import { proposeAndOpenPR, iterateOnPRFeedback, closeCoderSession, resetCoderSession } from "./agents/coder.js"
 import type { PRInfo } from "./agents/coder.js"
 import { reviewPR, approveAndMergePR, closeReviewerSession, resetReviewerSession } from "./agents/reviewer.js"
@@ -17,9 +24,10 @@ import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
 import { startSpan, endSpan } from "./trace.js"
 import { clearTokenStats } from "./token-tracker.js"
-import type { Task, PipelineResult } from "./types.js"
+import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
 
-const MAX_ROUNDS = 5
+// Fallback cap — PM plan.maxRounds always takes precedence when available
+const DEFAULT_MAX_ROUNDS = 3
 
 let _running = false
 
@@ -32,6 +40,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   _running = true
 
   // Fresh sessions for every run
+  await resetPMSession()
+  await resetArchitectSession()
   await resetCoderSession()
   await resetReviewerSession()
   await resetTesterSession()
@@ -55,18 +65,59 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   let finalStatus: "merged" | "unresolved" = "unresolved"
   const rounds: PipelineResult["rounds"] = []
 
+  // ── Phase 0: PM planning ──────────────────────────────────────────────────
+  let plan: PMPlan | null = null
+  let spec: Spec | null = null
+  let maxRounds = DEFAULT_MAX_ROUNDS
+
   try {
-    for (let round = 1; round <= MAX_ROUNDS; round++) {
+    emit("pm", "turn_start", `Planning task: ${task.title}`, 0)
+    plan = await planTask(task)
+    maxRounds = plan.maxRounds
+    emit("pm", "convergence", `Plan ready — maxRounds=${maxRounds}`, 0)
+    console.log(`\n[PIPELINE] PM plan: maxRounds=${maxRounds}`)
+  } catch (err) {
+    console.warn(`[PIPELINE] PM agent failed — falling back to default plan: ${err}`)
+    emit("orchestrator", "convergence", `PM agent failed, using default plan: ${err}`, 0)
+  }
+
+  // ── Phase 1: Architect contracts ──────────────────────────────────────────
+  if (plan) {
+    try {
+      emit("architect", "turn_start", `Deriving contracts for: ${task.title}`, 0)
+      spec = await deriveContracts(task, plan)
+      emit("architect", "convergence", `Contracts ready — ${spec.fileContracts.length} file(s)`, 0)
+    } catch (err) {
+      console.warn(`[PIPELINE] Architect agent failed — proceeding without contracts: ${err}`)
+      emit("orchestrator", "convergence", `Architect agent failed: ${err}`, 0)
+    }
+  }
+
+  // Assemble context objects to inject into per-agent prompts
+  const coderCtx = {
+    focusAreas: plan?.focusAreas,
+    acceptanceCriteria: spec?.acceptanceCriteria ?? plan?.subtasks.map((s) => s.acceptanceCriteria),
+  }
+  const reviewerCtx = {
+    riskFlags: plan?.riskFlags,
+  }
+  const testerCtx = {
+    acceptanceCriteria: spec?.acceptanceCriteria ?? plan?.subtasks.map((s) => s.acceptanceCriteria),
+    testHints: spec?.testHints,
+  }
+
+  try {
+    for (let round = 1; round <= maxRounds; round++) {
       roundStart(round)
 
-      // ── Coder ────────────────────────────────────────────────────────────
+      // ── Coder ──────────────────────────────────────────────────────────────
       const coderSpanId = startSpan(runId, "coder", round,
         round === 1 ? "Explore, fix, open PR" : `Iterate on PR feedback (round ${round})`,
         rootSpanId,
       )
       if (round === 1) {
-        // First round: explore, fix, open PR
-        pr = await proposeAndOpenPR(task, round)
+        // First round: explore, fix, open PR — with PM focus areas injected
+        pr = await proposeAndOpenPR(task, round, coderCtx)
         endSpan(runId, coderSpanId)
         console.log(`\n[PIPELINE] PR opened: ${pr.url}`)
       } else {
@@ -75,11 +126,12 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         endSpan(runId, coderSpanId)
       }
 
-      // ── Tester ───────────────────────────────────────────────────────────
+      // ── Tester ────────────────────────────────────────────────────────────
+      // Pass acceptance criteria + architect test hints to the tester
       const testerSpanId = startSpan(runId, "tester", round,
         `Run tests for PR #${pr!.number}`, rootSpanId,
       )
-      const testResult = await runTests(pr!, task.repo, round)
+      const testResult = await runTests(pr!, task.repo, round, testerCtx)
       endSpan(runId, testerSpanId)
 
       if (!testResult.passed) {
@@ -97,18 +149,19 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
           verdict: { decision: "reject", reason: `Tests failed: ${failSummary}`, nonNegotiable: false, round },
         })
 
-        if (round === MAX_ROUNDS) {
-          emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${MAX_ROUNDS}) reached`, round)
+        if (round === maxRounds) {
+          emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${maxRounds}) reached`, round)
           console.log(`\n  [UNRESOLVED] Max rounds reached`)
         }
         continue
       }
 
-      // ── Reviewer ─────────────────────────────────────────────────────────
+      // ── Reviewer ──────────────────────────────────────────────────────────
+      // Pass PM risk flags to the reviewer for extra scrutiny
       const reviewerSpanId = startSpan(runId, "reviewer", round,
         `Review PR #${pr!.number}`, rootSpanId,
       )
-      const verdict = await reviewPR(pr!, task.repo, round)
+      const verdict = await reviewPR(pr!, task.repo, round, reviewerCtx)
       endSpan(runId, reviewerSpanId)
 
       rounds.push({
@@ -133,7 +186,6 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       if (verdict.nonNegotiable) {
         emit("orchestrator", "convergence", `BLOCKED [NON-NEGOTIABLE]: ${verdict.reason}`, round)
         console.log(`  [BLOCKED] Non-negotiable rule violated: ${verdict.reason}`)
-        // Close the PR
         console.log(`  Closing PR ${pr!.url}`)
         finalStatus = "unresolved"
         break
@@ -144,8 +196,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       emit("orchestrator", "convergence", `REJECTED (round ${round}): ${verdict.reason}`, round)
       console.log("═".repeat(70))
 
-      if (round === MAX_ROUNDS) {
-        emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${MAX_ROUNDS}) reached`, round)
+      if (round === maxRounds) {
+        emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${maxRounds}) reached`, round)
         console.log(`\n  [UNRESOLVED] Max rounds reached`)
       }
     }
@@ -168,6 +220,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
     _running = false
     endSpan(runId, rootSpanId)
     finishRun(finalStatus, pr?.url)
+    await closePMSession()
+    await closeArchitectSession()
     await closeCoderSession()
     await closeTesterSession()
     await closeReviewerSession()
