@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router-dom"
+
 interface RunSummary {
   id: string
   taskId: string
@@ -6,11 +8,12 @@ interface RunSummary {
   finishedAt?: string
   status: "running" | "merged" | "unresolved" | "blocked"
   rounds: number
+  prUrl?: string
 }
 
 interface Props {
   runs: RunSummary[]
-  onSelect: (id: string) => void
+  onSelect?: (id: string) => void
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -33,7 +36,8 @@ function elapsed(start: string, end?: string) {
   return `${Math.round(ms / 60000)}m`
 }
 
-export function TaskHistory({ runs, onSelect }: Props) {
+export function TaskHistory({ runs }: Props) {
+  const navigate = useNavigate()
   if (runs.length === 0) return null
 
   return (
@@ -58,10 +62,9 @@ export function TaskHistory({ runs, onSelect }: Props) {
         MISSION LOG
       </span>
 
-      {[...runs].reverse().map((run) => (
+      {runs.map((run) => (
         <div
           key={run.id}
-          onClick={() => onSelect(run.id)}
           style={{
             display: "flex",
             alignItems: "center",
@@ -83,11 +86,38 @@ export function TaskHistory({ runs, onSelect }: Props) {
             {STATUS_ICON[run.status]}
           </span>
           <div>
-            <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.7)", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {/* Title — navigates to run detail page */}
+            <div
+              onClick={() => navigate(`/run/${run.id}`)}
+              style={{
+                fontSize: "10px",
+                color: "rgba(255,255,255,0.7)",
+                maxWidth: "180px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                textDecoration: "underline",
+                textDecorationColor: "rgba(255,255,255,0.2)",
+              }}
+            >
               {run.taskTitle}
             </div>
-            <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.25)" }}>
-              {run.rounds}r · {elapsed(run.startedAt, run.finishedAt)} · {new Date(run.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "8px", color: "rgba(255,255,255,0.25)" }}>
+                {run.rounds}r · {elapsed(run.startedAt, run.finishedAt)} · {new Date(run.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+              {/* PR link */}
+              {run.prUrl && (
+                <a
+                  href={run.prUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ fontSize: "8px", color: "#00ff87", textDecoration: "none" }}
+                >
+                  PR →
+                </a>
+              )}
             </div>
           </div>
         </div>

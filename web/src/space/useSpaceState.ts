@@ -64,7 +64,8 @@ export function useSpaceState() {
   const [currentRound, setCurrentRound] = useState(0)
   const [connected, setConnected] = useState(false)
   const [task, setTask] = useState<TaskInfo | null>(null)
-  const [runs, setRuns] = useState<any[]>([])
+  const [runs, setRuns] = useState<Array<{ id: string; taskId: string; taskTitle: string; status: "running" | "merged" | "unresolved" | "blocked"; rounds: number; startedAt: string; finishedAt?: string; prUrl?: string }>>([])
+
 
   const beamIdRef = useRef(0)
   const logIdRef = useRef(0)
