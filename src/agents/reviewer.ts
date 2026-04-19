@@ -109,23 +109,37 @@ function parseVerdict(result: { text: string; structured: unknown }, round: numb
     }
   }
 
-  // Fallback: parse text as JSON
-  try {
-    const parsed = JSON.parse(result.text.trim())
-    return {
-      decision: parsed.decision ?? "reject",
-      reason: parsed.reason ?? "No reason provided",
-      violatedRule: parsed.violatedRule,
-      nonNegotiable: parsed.nonNegotiable ?? false,
-      round,
-    }
-  } catch {
-    return {
-      decision: "reject",
-      reason: `Could not parse reviewer response: ${result.text.slice(0, 200)}`,
-      nonNegotiable: false,
-      round,
-    }
+  // Fallback: extract JSON from anywhere in the text (model may wrap in markdown)
+  const text = result.text.trim()
+  // Try raw parse first
+  const candidates = [
+    text,
+    // Extract from ```json ... ``` block
+    text.match(/```(?:json)?\s*([\s\S]+?)```/)?.[1]?.trim() ?? "",
+    // Extract first {...} block
+    text.match(/(\{[\s\S]+\})/)?.[1]?.trim() ?? "",
+  ]
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    try {
+      const parsed = JSON.parse(candidate)
+      if (parsed.decision) {
+        return {
+          decision: parsed.decision ?? "reject",
+          reason: parsed.reason ?? "No reason provided",
+          violatedRule: parsed.violatedRule,
+          nonNegotiable: parsed.nonNegotiable ?? false,
+          round,
+        }
+      }
+    } catch { /* try next */ }
+  }
+
+  return {
+    decision: "reject",
+    reason: `Could not parse reviewer response: ${text.slice(0, 200)}`,
+    nonNegotiable: false,
+    round,
   }
 }
 

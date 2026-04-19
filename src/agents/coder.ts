@@ -1,9 +1,13 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
 import type { BugSeed, Patch, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
 // ─── Coder Agent ──────────────────────────────────────────────────────────────
+
+const BAWARCHI_ROOT = "/home/ubuntu/bawarchi"
 
 async function getOc(): Promise<OpencodeClient> {
   return getClient()
@@ -20,35 +24,41 @@ async function ensureSession(): Promise<string> {
     await promptAndWait(oc, {
       sessionID: _sessionID,
       noReply: true,
-      parts: [
-        {
-          type: "text",
-          text: `You are the Coder agent in the Astrophage agent company.
-Your job is to fix bugs and implement code changes in the bawarchi Go codebase
-located at /home/ubuntu/bawarchi.
+      parts: [{
+        type: "text",
+        text: `You are the Coder agent in the Astrophage agent company.
+You fix bugs in the bawarchi Go codebase. The full file content will be provided
+in each request — do not try to read files yourself.
 
 Rules:
 - Always explain WHY the change fixes the bug.
 - Never introduce hardcoded secrets, tokens, or credentials.
-- If an auth env var is missing, the program must exit with an error — never silently proceed.
+- If an auth env var is missing, the program must exit with a clear error — never silently proceed.
 - Keep diffs minimal — change only what is necessary.
 
-Format your response EXACTLY as:
+Respond in EXACTLY this format, no other text:
 EXPLANATION: <why this fixes the bug>
 FILE: <relative path from bawarchi root>
 ORIGINAL:
 \`\`\`go
-<original code>
+<original buggy snippet>
 \`\`\`
 PROPOSED:
 \`\`\`go
-<fixed code>
+<fixed snippet>
 \`\`\``,
-        },
-      ],
+      }],
     })
   }
   return _sessionID
+}
+
+function readBawarchiFile(relPath: string): string {
+  try {
+    return readFileSync(join(BAWARCHI_ROOT, relPath), "utf8")
+  } catch {
+    return ""
+  }
 }
 
 function parseCoderResponse(raw: string, bug: BugSeed): Patch {
@@ -73,17 +83,25 @@ export async function proposeInitialFix(bug: BugSeed, round: number): Promise<Pa
   console.log(`\n[CODER] Analyzing bug in ${bug.file}:${bug.startLine}-${bug.endLine}`)
   console.log(`        ${bug.description}`)
 
+  // Read the actual file and include it so the model doesn't need filesystem access
+  const fileContent = readBawarchiFile(bug.file)
+
   const prompt = `Fix the following bug in the bawarchi codebase.
 
 Bug location: ${bug.file} lines ${bug.startLine}-${bug.endLine}
 Bug description: ${bug.description}
 
-Buggy code:
+Buggy code snippet:
 \`\`\`go
 ${bug.buggyCode}
 \`\`\`
 
-Propose a minimal, correct fix. Follow the output format specified.`
+Full file content for context:
+\`\`\`go
+${fileContent}
+\`\`\`
+
+Propose a minimal fix. Follow the output format exactly.`
 
   const result = await promptAndWait(oc, {
     sessionID,
@@ -114,14 +132,14 @@ export async function iterateFix(
   }
 
   if (verdict && verdict.decision === "reject") {
-    context += `Reviewer rejected with reason: ${verdict.reason}`
+    context += `Reviewer rejected: ${verdict.reason}`
     if (verdict.nonNegotiable) {
-      context += ` [NON-NEGOTIABLE RULE VIOLATED: ${verdict.violatedRule}]`
+      context += ` [NON-NEGOTIABLE: ${verdict.violatedRule}]`
     }
     context += "\n\n"
   }
 
-  context += "Revise your fix to address these issues. Follow the output format."
+  context += "Revise your fix. Follow the output format exactly."
 
   const result = await promptAndWait(oc, {
     sessionID,
