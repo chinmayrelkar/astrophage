@@ -1,4 +1,3 @@
-import React from "react"
 import type { AgentEvent } from "../hooks/useAgentStream"
 
 interface Props {

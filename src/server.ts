@@ -2,13 +2,61 @@ import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { streamSSE } from "hono/streaming"
 import { transcript } from "./transcript.js"
-import type { AgentEvent } from "./types.js"
+import type { AgentEvent, PipelineStatus } from "./types.js"
+
+// ─── Run history ──────────────────────────────────────────────────────────────
+
+export interface RunRecord {
+  id: string
+  taskId: string
+  taskTitle: string
+  startedAt: string
+  finishedAt?: string
+  status: PipelineStatus | "running"
+  rounds: number
+  events: AgentEvent[]
+}
+
+const runs: RunRecord[] = []
+let _currentRun: RunRecord | null = null
+
+export function startRun(taskId: string, taskTitle: string): RunRecord {
+  const run: RunRecord = {
+    id: `run_${Date.now()}`,
+    taskId,
+    taskTitle,
+    startedAt: new Date().toISOString(),
+    status: "running",
+    rounds: 0,
+    events: [],
+  }
+  _currentRun = run
+  runs.push(run)
+
+  // Attach to transcript — collect all events for this run
+  transcript.subscribe((event) => {
+    if (_currentRun === run) {
+      run.events.push(event)
+      if (event.type === "round_start") run.rounds = event.round
+    }
+  })
+
+  return run
+}
+
+export function finishRun(status: PipelineStatus) {
+  if (_currentRun) {
+    _currentRun.status = status
+    _currentRun.finishedAt = new Date().toISOString()
+    _currentRun = null
+  }
+}
 
 // ─── HTTP + SSE server ────────────────────────────────────────────────────────
 
 const app = new Hono()
 
-// CORS — allow the web UI (Vite dev server) to connect
+// CORS
 app.use("*", async (c, next) => {
   await next()
   c.header("Access-Control-Allow-Origin", "*")
@@ -16,39 +64,39 @@ app.use("*", async (c, next) => {
   c.header("Access-Control-Allow-Headers", "Content-Type")
 })
 
-// Health check
+// Health
 app.get("/health", (c) => c.json({ status: "ok", service: "astrophage" }))
 
-// SSE event stream — web UI subscribes here
+// SSE live stream
 app.get("/events", (c) => {
   return streamSSE(c, async (stream) => {
-    // Send initial ping
     await stream.writeSSE({ data: JSON.stringify({ type: "connected" }), event: "ping" })
 
     const unsub = transcript.subscribe(async (event: AgentEvent) => {
       try {
-        await stream.writeSSE({
-          data: JSON.stringify(event),
-          event: "agent_event",
-        })
-      } catch {
-        // Client disconnected
-      }
+        await stream.writeSSE({ data: JSON.stringify(event), event: "agent_event" })
+      } catch { /* client disconnected */ }
     })
 
-    // Keep alive until client disconnects
     await new Promise<void>((resolve) => {
-      stream.onAbort(() => {
-        unsub()
-        resolve()
-      })
+      stream.onAbort(() => { unsub(); resolve() })
     })
   })
 })
 
-// Transcript history — for run history panel
-app.get("/transcript", (c) => {
-  return c.json(transcript.getAll())
+// Current transcript
+app.get("/transcript", (c) => c.json(transcript.getAll()))
+
+// All runs (summary — no events)
+app.get("/runs", (c) => {
+  return c.json(runs.map(({ events: _, ...r }) => r))
+})
+
+// Single run with full events
+app.get("/runs/:id", (c) => {
+  const run = runs.find((r) => r.id === c.req.param("id"))
+  if (!run) return c.json({ error: "not found" }, 404)
+  return c.json(run)
 })
 
 export function startServer(port = 3001): Promise<void> {

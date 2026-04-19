@@ -7,7 +7,7 @@
  * Usage: npx tsx src/main.ts
  */
 
-import { startServer } from "./server.js"
+import { startServer, startRun, finishRun } from "./server.js"
 import { proposeInitialFix, closeCoderSession } from "./agents/coder.js"
 import { reviewPatch, closeReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
@@ -102,12 +102,15 @@ async function main() {
 
   // Start SSE server so web UI can connect
   await startServer(3001)
+  startRun(task.id, task.title)
 
   try {
     const result = await runIteration0()
+    finishRun(result.status)
     process.exit(result.status === "merged" ? 0 : 1)
   } catch (err) {
     console.error("[ASTROPHAGE] Fatal error:", err)
+    finishRun("unresolved")
     process.exit(1)
   } finally {
     await closeCoderSession()
