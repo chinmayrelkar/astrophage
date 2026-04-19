@@ -1,13 +1,13 @@
 import { useState, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import { useSpaceState } from "./space/useSpaceState"
 import { SpaceCanvas } from "./space/SpaceCanvas"
 import { MissionLog } from "./space/MissionLog"
 import { TaskHistory } from "./space/TaskHistory"
-import { LandingPage } from "./LandingPage"
 import type { AgentName } from "./hooks/useAgentStream"
 
 export default function App() {
-  const [showLanding, setShowLanding] = useState(true)
+  const navigate = useNavigate()
   const [selectedAgent, setSelectedAgent] = useState<AgentName | null>(null)
   const [logOpen, setLogOpen] = useState(true)
   const [_selectedRun, setSelectedRun] = useState<string | null>(null)
@@ -23,10 +23,6 @@ export default function App() {
     setSelectedAgent(null)
     setLogOpen(false)
   }, [])
-
-  if (showLanding) {
-    return <LandingPage onEnter={() => setShowLanding(false)} />
-  }
 
   return (
     <div style={{
@@ -50,7 +46,7 @@ export default function App() {
         zIndex: 10,
       }}>
         <button
-          onClick={() => setShowLanding(true)}
+          onClick={() => navigate("/")}
           style={{
             background: "none",
             border: "none",

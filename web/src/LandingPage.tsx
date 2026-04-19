@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { AGENTS } from "./space/agents"
 import { StarfieldBackground } from "./space/StarfieldBackground"
 
 interface Props {
-  onEnter: () => void
+  // kept for potential programmatic use; route-based nav is the default
+  onEnter?: () => void
 }
 
 const PIPELINE = [
@@ -180,6 +182,8 @@ function PipelineArrow() {
 
 // ─── Main landing page ────────────────────────────────────────────────────────
 export function LandingPage({ onEnter }: Props) {
+  const navigate = useNavigate()
+  const goToApp = () => { onEnter?.(); navigate("/app") }
   const [typed, setTyped] = useState("")
   const tagline = "An agent company — a team of specialized AI that ships code."
 
@@ -243,7 +247,7 @@ export function LandingPage({ onEnter }: Props) {
             OPENCODE ↗
           </a>
           <button
-            onClick={onEnter}
+            onClick={goToApp}
             style={{
               background: "rgba(0,255,135,0.12)",
               border: "1px solid rgba(0,255,135,0.4)",
@@ -312,7 +316,7 @@ export function LandingPage({ onEnter }: Props) {
 
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
           <button
-            onClick={onEnter}
+            onClick={goToApp}
             style={{
               background: "linear-gradient(135deg, rgba(0,255,135,0.18), rgba(0,200,255,0.12))",
               border: "1px solid rgba(0,255,135,0.5)",
@@ -498,7 +502,7 @@ export function LandingPage({ onEnter }: Props) {
               ))}
             </div>
             <button
-              onClick={onEnter}
+              onClick={goToApp}
               style={{
                 marginTop: "32px",
                 background: "rgba(96,165,250,0.12)",
@@ -784,7 +788,7 @@ export function LandingPage({ onEnter }: Props) {
             Open the live space UI — ships orbit, lasers fly, agents converge.
           </p>
           <button
-            onClick={onEnter}
+            onClick={goToApp}
             style={{
               background: "linear-gradient(135deg, rgba(0,255,135,0.2), rgba(0,200,255,0.14))",
               border: "1px solid rgba(0,255,135,0.5)",
