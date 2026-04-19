@@ -221,9 +221,9 @@ export function LandingPage() {
   const navigate = useNavigate()
 
   const headlines = [
-    "We replaced the engineering team.",
-    "Bug to merged PR. Zero humans.",
-    "6 AI agents. 1 task. Ship it.",
+    "7 agents. Zero humans. Fully autonomous.",
+    "Finds bugs. Writes code. Ships PRs.",
+    "Scans your repo while you sleep.",
   ]
 
   return (
@@ -429,11 +429,11 @@ export function LandingPage() {
             display: "flex",
             gap: "24px",
           }}>
-            <span>6 SPECIALIZED AGENTS</span>
+            <span>7 SPECIALIZED AGENTS</span>
             <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
-            <span>AUTONOMOUS PIPELINE</span>
+            <span>FULLY AUTONOMOUS</span>
             <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
-            <span>OPENCODE SDK</span>
+            <span>ZERO HUMAN TASKS</span>
           </div>
         </div>
 
@@ -479,9 +479,10 @@ export function LandingPage() {
               lineHeight: 1.85,
               maxWidth: "680px",
             }}>
-              Each agent is a character from the novel — Ryland Grace writes code, Rocky reviews
-              it with no compromise, Stratt runs the mission. They orbit your task in a live 2D
-              space UI and communicate via laser beams. Give them a bug. They ship a PR.
+              Seven agents orbit your codebase. DuBois scans for bugs and violations. Lokken
+              prioritizes features and writes the roadmap. Stratt plans the fix. Ryland Grace
+              writes code. Yao tests it. Rocky reviews with no compromise. No human submits
+              tasks — the crew finds work autonomously and ships merged PRs.
             </p>
           </FadeIn>
         </div>
@@ -498,12 +499,13 @@ export function LandingPage() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
             {[
-              { agent: AGENTS.find(a => a.name === "pm")!, step: "01", action: "Decomposes the task into clear engineering specs" },
-              { agent: AGENTS.find(a => a.name === "architect")!, step: "02", action: "Designs file contracts and interfaces before a single line is written" },
-              { agent: AGENTS.find(a => a.name === "coder")!, step: "03", action: "Implements the fix, iterates on feedback" },
-              { agent: AGENTS.find(a => a.name === "tester")!, step: "04", action: "Writes tests, runs them, reports truth — not opinion" },
-              { agent: AGENTS.find(a => a.name === "reviewer")!, step: "05", action: "Reviews against a hardcoded constitution. No negotiation on security." },
-              { agent: AGENTS.find(a => a.name === "scout")!, step: "06", action: "Branch → commit → PR → merge. Done." },
+              { agent: AGENTS.find(a => a.name === "scout")!, step: "01", action: "Scans GitHub issues and the codebase for bugs, violations, and actionable work" },
+              { agent: AGENTS.find(a => a.name === "product")!, step: "02", action: "Reads feedback, builds a prioritized backlog, writes the roadmap, queues features" },
+              { agent: AGENTS.find(a => a.name === "pm")!, step: "03", action: "Plans the fix — sets maxRounds, focus areas, risk flags for each task" },
+              { agent: AGENTS.find(a => a.name === "architect")!, step: "04", action: "Designs file contracts and interfaces before a single line is written" },
+              { agent: AGENTS.find(a => a.name === "coder")!, step: "05", action: "Implements the fix, opens the PR, iterates on feedback" },
+              { agent: AGENTS.find(a => a.name === "tester")!, step: "06", action: "Writes tests, runs them, reports truth — not opinion" },
+              { agent: AGENTS.find(a => a.name === "reviewer")!, step: "07", action: "Reviews against a hardcoded constitution. No negotiation on security." },
             ].map(({ agent, step, action }, i) => (
               <FadeIn key={agent!.name} delay={i * 60}>
                 <div style={{
@@ -568,8 +570,8 @@ export function LandingPage() {
               color: "rgba(255,255,255,0.35)",
               lineHeight: 1.7,
             }}>
-              <span style={{ color: "#00ff87" }}>Convergence loop:</span>{" "}
-              steps 03–05 repeat until tests pass <em>and</em> Rocky approves — or max rounds are hit and the pipeline exits with <code style={{ color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.05)", padding: "1px 5px", borderRadius: "3px" }}>[UNRESOLVED]</code>.
+              <span style={{ color: "#00ff87" }}>Autonomous:</span>{" "}
+              Steps 01–02 run continuously to find work. Steps 05–07 loop until tests pass <em>and</em> Rocky approves — or max rounds are hit. No human triggers anything.
             </div>
           </FadeIn>
         </div>

@@ -22,29 +22,31 @@ const TECH_STACK = [
   { layer: "Model", tech: "opencode/claude-sonnet-4-6" },
   { layer: "Web UI", tech: "Vite · React · Canvas 2D" },
   { layer: "Git Operations", tech: "gh CLI" },
-  { layer: "Target Repo", tech: "chinmayrelkar/bawarchi" },
+  { layer: "CI", tech: "GitHub Actions (evals gate)" },
 ]
 
 const ARCH_FILES = [
-  { path: "src/main.ts", desc: "Entry point — seeds task, starts server, runs pipeline" },
-  { path: "src/server.ts", desc: "Hono HTTP + SSE /events — streams to web UI" },
-  { path: "src/client.ts", desc: "OpenCode SDK client — spawns dedicated server on port 4097" },
-  { path: "src/orchestrator.ts", desc: "Full pipeline: PM → Arch → Code↔Test↔Review → Git" },
-  { path: "src/loop.ts", desc: "Convergence loop with max-round enforcement" },
+  { path: "src/main.ts", desc: "Entry point — starts server, autonomous loop boots on startup" },
+  { path: "src/server.ts", desc: "Hono HTTP + SSE + autonomous status endpoints" },
+  { path: "src/client.ts", desc: "OpenCode SDK client — dynamic working directory per task" },
+  { path: "src/pipeline.ts", desc: "PM → Architect → loop(Coder → Tester → Reviewer) → merge" },
+  { path: "src/autonomous-loop.ts", desc: "Continuous loop: Scout + Product → queue → dispatch" },
   { path: "src/transcript.ts", desc: "Singleton event emitter → SSE" },
-  { path: "src/constitution.ts", desc: "Reviewer rules (non-negotiable + negotiable)" },
-  { path: "src/types.ts", desc: "Shared types: Task, RepoContext, Patch, ReviewVerdict…" },
-  { path: "src/agents/coder.ts", desc: "Ryland Grace — implements fixes, iterates on feedback" },
-  { path: "src/agents/reviewer.ts", desc: "Rocky — reviews against the constitution" },
-  { path: "src/agents/pm.ts", desc: "Stratt — decomposes tasks, assigns work" },
-  { path: "src/agents/architect.ts", desc: "Ilyukhina — designs interfaces and file contracts" },
+  { path: "src/token-tracker.ts", desc: "Per-turn token/cost accounting at Sonnet rates" },
+  { path: "src/trace.ts", desc: "Span-based trace tree — nested call graph per run" },
+  { path: "src/run-memory.ts", desc: "Cross-run memory — PM learns from past outcomes" },
+  { path: "src/eval-store.ts", desc: "Eval regression tracking across versions" },
+  { path: "src/types.ts", desc: "Shared types: Task, BacklogItem, PMPlan, Roadmap…" },
+  { path: "src/agents/scout.ts", desc: "DuBois — scans GitHub issues + codebase for bugs" },
+  { path: "src/agents/product.ts", desc: "Lokken — backlog, roadmap, features, spikes" },
+  { path: "src/agents/pm.ts", desc: "Stratt — task planning with cross-run memory" },
+  { path: "src/agents/architect.ts", desc: "Ilyukhina — file contracts and test hints" },
+  { path: "src/agents/coder.ts", desc: "Ryland Grace — implements fixes, opens PRs" },
   { path: "src/agents/tester.ts", desc: "Yao — writes and runs tests" },
-  { path: "src/agents/git.ts", desc: "DuBois — branch, commit, PR, merge" },
-  { path: "web/src/space/SpaceCanvas.tsx", desc: "Canvas: starfield, ships, beams, task star" },
-  { path: "web/src/space/MissionLog.tsx", desc: "Comms log panel" },
-  { path: "web/src/space/TaskHistory.tsx", desc: "Bottom run history strip" },
-  { path: "web/src/space/agents.ts", desc: "Character definitions, colors, orbits" },
-  { path: "web/src/space/useSpaceState.ts", desc: "SSE subscriber → space state" },
+  { path: "src/agents/reviewer.ts", desc: "Rocky — constitution enforcement" },
+  { path: "evals/eval-set.json", desc: "Named eval set (12 test cases)" },
+  { path: "evals/run-evals.ts", desc: "CI eval runner — exit 1 on failure" },
+  { path: ".github/workflows/evals.yml", desc: "GitHub Actions CI gate for evals" },
 ]
 
 function Section({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
@@ -103,10 +105,12 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
 const NAV_ITEMS = [
   { id: "overview", label: "Overview" },
   { id: "agents", label: "The Agents" },
+  { id: "autonomous", label: "Autonomous Mode" },
   { id: "pipeline", label: "Pipeline" },
   { id: "constitution", label: "Constitution" },
+  { id: "observability", label: "Observability" },
+  { id: "evals", label: "Evaluation" },
   { id: "space-ui", label: "Space UI" },
-  { id: "demo", label: "Demo" },
   { id: "architecture", label: "Architecture" },
   { id: "running", label: "Running It" },
   { id: "tech-stack", label: "Tech Stack" },
@@ -206,7 +210,7 @@ export function DocsPage() {
               Astrophage Docs
             </h1>
             <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.35)", lineHeight: 1.8, maxWidth: "580px" }}>
-              An agent company — a team of specialized AI agents that collaborates like a software engineering team to implement, review, test, and ship code autonomously. Named after the microbe in{" "}
+              A fully autonomous agent company — 7 AI agents that scan repos for bugs and features, plan fixes, write code, test, review, and ship merged PRs with zero human intervention. Named after the microbe in{" "}
               <a href="https://en.wikipedia.org/wiki/Project_Hail_Mary" target="_blank" rel="noreferrer" style={{ color: "#60a5fa", textDecoration: "none" }}>Project Hail Mary</a>.
             </p>
           </div>
@@ -214,22 +218,19 @@ export function DocsPage() {
           {/* ── OVERVIEW ── */}
           <Section id="overview" label="OVERVIEW">
             <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.45)", lineHeight: 1.85, marginBottom: "20px" }}>
-              You give Astrophage a task — a bug, a feature, a security fix. The agent company takes it from plain-English description to a merged pull request with no human in the loop.
+              No human submits tasks. Two autonomous agents continuously scan watched repos for work. When they find bugs or features, tasks are queued and the pipeline runs automatically.
             </p>
             <CodeBlock>
-{`PM (Stratt)
-  └─► Architect (Ilyukhina)  — designs interfaces and file contracts
-        └─► Coder (Ryland Grace)  — implements the fix
-              └─► Tester (Yao)  — writes and runs tests
-                    └─► Reviewer (Rocky)  — reviews against the constitution
-                          └─► PASS? ──No──► Coder iterates → loop
-                                │
-                               Yes
-                                └─► Git (DuBois)  — branch → commit → PR → merge`}
+{`Scout (DuBois)  ─── bugs + code violations ──┐
+                                              ├──► Task Queue ──► Pipeline
+Product (Lokken) ─── features + spikes ───────┘
+
+Pipeline:
+  PM (Stratt) ─► Architect (Ilyukhina) ─► loop[ Coder → Tester → Reviewer ] ─► merge PR`}
             </CodeBlock>
             <p style={{ marginTop: "16px", fontSize: "12px", color: "rgba(255,255,255,0.3)", lineHeight: 1.7 }}>
               <strong style={{ color: "rgba(255,255,255,0.5)" }}>Convergence:</strong>{" "}
-              The loop ends when tests pass AND the reviewer accepts. If max rounds are hit, the pipeline exits with <Code>[UNRESOLVED]</Code> and a full transcript.
+              The loop ends when tests pass AND the reviewer accepts. Max rounds are set dynamically by the PM based on task complexity. The PM learns from past run outcomes.
             </p>
           </Section>
 
@@ -276,12 +277,13 @@ export function DocsPage() {
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {[
-                { step: "1", agent: "PM", name: "Stratt", color: "#a78bfa", desc: "Receives the plain-English task. Decomposes it into a structured spec: goal, constraints, acceptance criteria." },
-                { step: "2", agent: "ARCHITECT", name: "Ilyukhina", color: "#60a5fa", desc: "Reads the spec. Produces file-level contracts: which files are touched, what interfaces are added/changed, no implementation." },
-                { step: "3", agent: "CODER", name: "Ryland Grace", color: "#00ff87", desc: "Receives the architecture. Implements the changes. On subsequent rounds receives the reviewer's feedback." },
-                { step: "4", agent: "TESTER", name: "Yao", color: "#f472b6", desc: "Writes tests for the new code. Runs them. Returns a structured verdict: pass/fail with full output." },
-                { step: "5", agent: "REVIEWER", name: "Rocky", color: "#fbbf24", desc: "Reviews the diff against the constitution. Returns PASS or FAIL with specific citations. Non-negotiable violations terminate immediately." },
-                { step: "6", agent: "GIT", name: "DuBois", color: "#34d399", desc: "Only reached on PASS. Creates branch, commits, opens PR, merges after review. Returns the PR URL." },
+                { step: "0", agent: "SCOUT", name: "DuBois", color: "#34d399", desc: "Autonomously scans GitHub issues and the codebase for bugs, security violations, and constitution breaches. Queues actionable tasks." },
+                { step: "0", agent: "PRODUCT", name: "Lokken", color: "#fb923c", desc: "Reads issues and feedback, builds a prioritized feature backlog, writes ROADMAP.md, queues feature and spike tasks." },
+                { step: "1", agent: "PM", name: "Stratt", color: "#a78bfa", desc: "Receives the task. Explores the repo, produces a plan: subtasks, maxRounds, focus areas for the coder, risk flags for the reviewer. Reads past run outcomes for the same repo." },
+                { step: "2", agent: "ARCHITECT", name: "Ilyukhina", color: "#60a5fa", desc: "Reads the PM plan. Explores the repo, produces file contracts (which files to change, interfaces) and test hints." },
+                { step: "3", agent: "CODER", name: "Ryland Grace", color: "#00ff87", desc: "Implements the fix guided by PM focus areas and Architect contracts. Opens a PR. On subsequent rounds reads review comments and iterates." },
+                { step: "4", agent: "TESTER", name: "Yao", color: "#f472b6", desc: "Writes tests guided by PM acceptance criteria and Architect test hints. Runs them. Reports pass/fail with full output." },
+                { step: "5", agent: "REVIEWER", name: "Rocky", color: "#fbbf24", desc: "Reviews the PR diff against the constitution, guided by PM risk flags. Approves and merges on pass. Non-negotiable violations terminate immediately." },
               ].map(s => (
                 <div key={s.step} style={{
                   display: "grid",
@@ -367,56 +369,63 @@ export function DocsPage() {
             </div>
           </Section>
 
-          {/* ── DEMO ── */}
-          <Section id="demo" label="DEMO — BAWARCHI AUTH BUGS">
+          {/* ── AUTONOMOUS MODE ── */}
+          <Section id="autonomous" label="AUTONOMOUS MODE">
             <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.45)", lineHeight: 1.85, marginBottom: "24px" }}>
-              <a href="https://github.com/chinmayrelkar/bawarchi" target="_blank" rel="noreferrer" style={{ color: "#60a5fa", textDecoration: "none" }}>Bawarchi</a>{" "}
-              is a Go CLI generator that reads OpenAPI/proto specs and produces compiled CLIs. Two auth bugs are seeded for demonstration.
+              Human task submission is disabled. The system runs a continuous loop:
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
               {[
-                {
-                  file: "demo/bawarchi/oauth-task.ts",
-                  title: "OAuth Task",
-                  color: "#a78bfa",
-                  badge: "RESOLVED",
-                  badgeColor: "#00ff87",
-                  rows: [
-                    ["Bug", "gRPC CLI silently skips auth when env var is unset"],
-                    ["Violation", "Non-negotiable — auth must never silently succeed"],
-                    ["Outcome", "3-round negotiation. Coder concedes on error message wording. Reviewer accepts."],
-                  ],
-                },
-                {
-                  file: "demo/bawarchi/apikey-task.ts",
-                  title: "API Key Task",
-                  color: "#f472b6",
-                  badge: "INSTANT BLOCK",
-                  badgeColor: "#ef4444",
-                  rows: [
-                    ["Bug", "API key appended as URL query parameter"],
-                    ["Violation", "Non-negotiable — credentials must never appear in URLs"],
-                    ["Outcome", "Reviewer kills it in round 1. No negotiation."],
-                  ],
-                },
-              ].map(d => (
-                <div key={d.title} style={{ border: `1px solid ${d.color}22`, borderRadius: "8px", overflow: "hidden" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", background: `${d.color}08`, borderBottom: `1px solid ${d.color}15` }}>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: d.color }}>{d.title}</span>
-                    <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                      <code style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)" }}>{d.file}</code>
-                      <span style={{ fontSize: "8px", fontWeight: 700, color: d.badgeColor, border: `1px solid ${d.badgeColor}44`, borderRadius: "3px", padding: "2px 7px", letterSpacing: "0.1em" }}>{d.badge}</span>
-                    </div>
+                { name: "Scout cycle", desc: "DuBois scans every 5 min (SCOUT_INTERVAL_MS). Reads GitHub issues + greps the codebase for constitution violations." },
+                { name: "Product cycle", desc: "Lokken runs every 15 min (PRODUCT_INTERVAL_MS). Builds a prioritized feature backlog and writes ROADMAP.md." },
+                { name: "Task queue", desc: "Bug tasks (from Scout) are prepended; feature tasks (from Product) are appended. Pipeline dispatches one at a time." },
+                { name: "Deduplication", desc: "Seen issues are tracked in ~/.astrophage/seen-issues.json. Same issue is never queued twice." },
+                { name: "Cross-run memory", desc: "PM reads past run outcomes for the same repo from ~/.astrophage/run-memory.json to avoid repeating mistakes." },
+                { name: "Crash recovery", desc: "Events are written to disk incrementally. Runs that were in-progress at shutdown are marked unresolved on restart." },
+              ].map(f => (
+                <div key={f.name} style={{ display: "flex", gap: "14px", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <span style={{ color: "#34d399", flexShrink: 0, marginTop: "1px" }}>▸</span>
+                  <div>
+                    <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "12px" }}>{f.name}</span>
+                    <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "12px" }}>{" — "}{f.desc}</span>
                   </div>
-                  {d.rows.map(([label, text]) => (
-                    <div key={label} style={{ display: "grid", gridTemplateColumns: "80px 1fr", borderBottom: "1px solid rgba(255,255,255,0.04)", padding: "10px 18px", gap: "12px" }}>
-                      <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.1em", paddingTop: "2px" }}>{label.toUpperCase()}</div>
-                      <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>{text}</div>
-                    </div>
-                  ))}
                 </div>
               ))}
             </div>
+          </Section>
+
+          {/* ── OBSERVABILITY ── */}
+          <Section id="observability" label="OBSERVABILITY">
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {[
+                { name: "Live SSE stream", desc: "Every agent event streamed to the web UI in real time via /events." },
+                { name: "Per-run detail pages", desc: "Events tab (filterable by round) + Trace tab with nested call graph." },
+                { name: "Token/cost tracking", desc: "Per-agent, per-turn cost breakdown at Claude Sonnet rates ($3/M in, $15/M out)." },
+                { name: "Trace tree", desc: "All 5 pipeline agents (PM, Architect, Coder, Tester, Reviewer) have trace spans with cost per node." },
+                { name: "Incremental persistence", desc: "Events written to .events.ndjson sidecar as they arrive. Full run JSON rewritten every 10 events." },
+                { name: "Cost aggregation", desc: "GET /runs/:id/costs returns per-agent breakdown. GET /stats returns cross-run totals." },
+              ].map(f => (
+                <div key={f.name} style={{ display: "flex", gap: "14px", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <span style={{ color: "#60a5fa", flexShrink: 0, marginTop: "1px" }}>▸</span>
+                  <div>
+                    <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "12px" }}>{f.name}</span>
+                    <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "12px" }}>{" — "}{f.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          {/* ── EVALUATION ── */}
+          <Section id="evals" label="EVALUATION">
+            <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.45)", lineHeight: 1.85, marginBottom: "20px" }}>
+              A named eval set with 12 test cases covering reviewer verdict parsing, tester result parsing, and pipeline convergence logic.
+            </p>
+            <CodeBlock>{"npm run eval    # exits 1 on any failure"}</CodeBlock>
+            <p style={{ marginTop: "16px", fontSize: "12px", color: "rgba(255,255,255,0.3)", lineHeight: 1.7 }}>
+              CI gated via <Code>.github/workflows/evals.yml</Code> — blocks merge on failure.
+              Regression tracking via <Code>~/.astrophage/eval-history.json</Code> compares each run to the previous and reports regressions.
+            </p>
           </Section>
 
           {/* ── ARCHITECTURE ── */}

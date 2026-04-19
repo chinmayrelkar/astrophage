@@ -1,49 +1,88 @@
 # Astrophage
 
-An **agent company** — a team of specialized AI agents that collaborates like a software engineering team to implement, review, test, and ship code autonomously. Named after the microbe in *Project Hail Mary*.
-
-The agents are themed after the characters from the novel. They orbit a central task in a live 2D space UI and communicate via laser beams.
+A **fully autonomous agent company** — 7 specialized AI agents that scan repos for bugs and features, plan fixes, write code, test, review, and ship merged PRs with zero human intervention. Named after the microbe in *Project Hail Mary*.
 
 ---
 
-## What It Does
+## How It Works
 
-You give Astrophage a task (a bug, a feature, a security fix). The agent company takes it from description to merged pull request:
+No human submits tasks. Two autonomous agents — **Scout (DuBois)** and **Product (Lokken)** — continuously scan watched repos for work:
+
+- **DuBois** scans GitHub Issues and reads the codebase directly for bugs, security violations, and constitution breaches
+- **Lokken** reads issues and user feedback, builds a prioritized feature backlog, writes a `ROADMAP.md`, and queues feature/spike tasks
+
+When they find actionable work, tasks are queued and dispatched automatically:
 
 ```
-PM (Stratt)
-  └─► Architect (Ilyukhina)  — designs interfaces and file contracts
-        └─► Coder (Ryland Grace)  — implements the fix
-              └─► Tester (Yao)  — writes and runs tests
-                    └─► Reviewer (Rocky)  — reviews against the constitution
-                          └─► PASS? ──No──► Coder iterates → loop
-                                │
-                               Yes
-                                └─► Git (DuBois)  — branch → commit → PR → merge
+Scout (DuBois)  ─── bugs + code violations ──┐
+                                              ├──► Task Queue ──► Pipeline
+Product (Lokken) ─── features + spikes ───────┘
+
+Pipeline:
+  PM (Stratt) ─► Architect (Ilyukhina) ─► loop[ Coder → Tester → Reviewer ] ─► merge PR
 ```
 
-**Convergence:** The loop ends when tests pass AND the reviewer accepts. If max rounds are hit, the pipeline exits with `[UNRESOLVED]` and a full transcript.
+Bug tasks are prioritized ahead of feature tasks. The convergence loop runs until tests pass AND the reviewer accepts, or max rounds (set dynamically by the PM) are hit.
 
 ---
 
 ## The Agents
 
-| Agent | Character | Ship | Role |
+| Role | Character | Ship | What they do |
 |---|---|---|---|
-| Coder | Ryland Grace | *Hail Mary* | Implements fixes, iterates on feedback |
-| Reviewer | Rocky | *Eridian Vessel* | Reviews code against the constitution — no compromise |
-| PM | Stratt | *Command Station* | Decomposes tasks, assigns work |
-| Tester | Yao | *Research Module* | Writes tests, runs `go test`, reports truth |
-| Architect | Ilyukhina | *Blueprint Pod* | Designs file contracts before coding starts |
-| Git | DuBois | *Supply Drone* | Branch, commit, PR, merge |
+| **SCOUT** | DuBois | Scout Probe | Scans GitHub issues + codebase for bugs and violations |
+| **PRODUCT** | Lokken | Observatory | Reads feedback, builds backlog, writes roadmap, queues features |
+| **PM** | Stratt | Command Station | Decomposes tasks, sets maxRounds, injects focus areas + risk flags |
+| **ARCHITECT** | Ilyukhina | Blueprint Pod | Designs file contracts and interfaces before coding starts |
+| **CODER** | Ryland Grace | Hail Mary | Implements fixes, opens PRs, iterates on review feedback |
+| **TESTER** | Yao | Research Module | Writes tests, runs them, reports pass or fail |
+| **REVIEWER** | Rocky | Eridian Vessel | Reviews PRs against the constitution. No compromise. |
 
-Each agent has its own isolated [OpenCode SDK](https://opencode.ai) session.
+Each agent has its own isolated [OpenCode SDK](https://opencode.ai) session with scoped permissions.
+
+---
+
+## Autonomous Mode
+
+Human task submission is disabled. The system runs a continuous loop:
+
+- **Scout** runs every 5 minutes (configurable via `SCOUT_INTERVAL_MS`)
+- **Product** runs every 15 minutes (configurable via `PRODUCT_INTERVAL_MS`)
+- Pipeline dispatches one task at a time from the queue
+- Run history, events, and agent memory persist across restarts
+
+The PM learns from past outcomes — if a fix was rejected before, it adjusts the plan for the next attempt.
+
+---
+
+## Observability
+
+- **Live SSE stream** — every agent event streamed to the web UI in real time
+- **Per-run detail pages** — Events tab + Trace tab with nested call graph
+- **Token/cost tracking** — per-agent, per-turn, per-span cost breakdown at Sonnet rates
+- **Trace tree** — who called whom, duration and cost per node (PM, Architect, Coder, Tester, Reviewer all instrumented)
+- **Incremental persistence** — events written to disk as they arrive, runs survive restarts
+
+---
+
+## Evaluation
+
+A named eval set (`evals/eval-set.json`) with 12 test cases covering:
+- Reviewer verdict parsing (accept, reject, non-negotiable, fenced JSON, garbage fallback)
+- Tester result parsing (pass, fail, no test files)
+- Pipeline convergence logic (accept round 1, non-neg block, max rounds, test-fail-then-pass)
+
+```bash
+npm run eval    # exits 1 on any failure
+```
+
+CI gated via `.github/workflows/evals.yml` — blocks merge on failure.
 
 ---
 
 ## The Reviewer Constitution
 
-The Reviewer (Rocky) enforces a hardcoded constitution with two tiers:
+Rocky enforces a hardcoded constitution with two tiers:
 
 **Non-Negotiable** — instant block, no further rounds:
 - No hardcoded secrets, API keys, or client IDs in source
@@ -60,33 +99,16 @@ The Reviewer (Rocky) enforces a hardcoded constitution with two tiers:
 
 ---
 
-## Demo: Bawarchi Auth Bugs
-
-[Bawarchi](https://github.com/chinmayrelkar/bawarchi) is a Go CLI generator that reads OpenAPI/proto specs and produces compiled CLIs. It has two seeded auth bugs used to demonstrate the agent company:
-
-**OAuth task** (`demo/bawarchi/oauth-task.ts`)
-- Bug: gRPC CLI silently skips auth when env var is unset
-- Constitution: non-negotiable violation — auth must never silently succeed
-- Expected: 3-round negotiation, coder concedes on error message wording, reviewer accepts
-
-**API key task** (`demo/bawarchi/apikey-task.ts`)
-- Bug: API key appended as URL query parameter
-- Constitution: non-negotiable violation — credentials must never appear in URLs
-- Expected: reviewer kills it in round 1, no negotiation
-
-Same constitution. Same company. Two tasks, two outcomes. The reviewer has rules, not opinions.
-
----
-
 ## The Space UI
 
 A live 2D space canvas at `http://localhost:5173` (or your Tailscale hostname).
 
 - **Task Star** — the current task glows at the center
-- **Ships** — each agent orbits at a different radius and speed, glowing when active
-- **Laser beams** — animated beams between ships when agents communicate, colour-coded by type
-- **Mission Log** — right panel, full chronological comms log; click any ship to filter to that agent
-- **Task History** — bottom strip showing all past runs with status, elapsed time, round count
+- **Ships** — 7 agents orbit at different radii, glowing when active, with role labels
+- **Laser beams** — animated beams between ships during communication
+- **Mission Log** — chronological event feed, filterable by agent
+- **Autonomous Panel** — live view of Scout/Product status, task queue, backlog
+- **Run Pages** — per-run detail with Events + Trace tabs, cost breakdown, call graph
 
 ---
 
@@ -95,38 +117,45 @@ A live 2D space canvas at `http://localhost:5173` (or your Tailscale hostname).
 ```
 Astrophage/
 ├── src/
-│   ├── main.ts              # Entry point — seeds task, starts server, runs pipeline
-│   ├── server.ts            # Hono HTTP + SSE /events — streams to web UI
-│   ├── client.ts            # OpenCode SDK client — spawns dedicated server on port 4097
-│   ├── orchestrator.ts      # Full pipeline: PM → Arch → Code↔Test↔Review → Git
-│   ├── loop.ts              # Convergence loop with max-round enforcement
+│   ├── main.ts              # Entry point — starts server + autonomous loop
+│   ├── server.ts            # Hono HTTP + SSE + autonomous status endpoints
+│   ├── client.ts            # OpenCode SDK client — dynamic working directory
+│   ├── pipeline.ts          # PM → Architect → loop(Coder → Tester → Reviewer) → merge
+│   ├── autonomous-loop.ts   # Continuous loop: Scout + Product → queue → dispatch
 │   ├── transcript.ts        # Singleton event emitter → SSE
-│   ├── constitution.ts      # Reviewer rules (non-negotiable + negotiable)
-│   ├── types.ts             # Shared types: Task, RepoContext, Patch, ReviewVerdict…
+│   ├── token-tracker.ts     # Per-turn token/cost accounting
+│   ├── trace.ts             # Span-based trace tree for the call graph
+│   ├── run-memory.ts        # Cross-run memory — PM learns from past outcomes
+│   ├── eval-store.ts        # Eval regression tracking
+│   ├── types.ts             # Shared types
 │   └── agents/
-│       ├── coder.ts         # Ryland Grace
-│       ├── reviewer.ts      # Rocky
-│       ├── pm.ts            # Stratt
-│       ├── architect.ts     # Ilyukhina
-│       ├── tester.ts        # Yao
-│       └── git.ts           # DuBois
+│       ├── scout.ts         # DuBois — scans issues + code for bugs
+│       ├── product.ts       # Lokken — backlog, roadmap, features, spikes
+│       ├── pm.ts            # Stratt — task planning
+│       ├── architect.ts     # Ilyukhina — file contracts
+│       ├── coder.ts         # Ryland Grace — implementation
+│       ├── tester.ts        # Yao — tests
+│       └── reviewer.ts      # Rocky — constitution enforcement
+│
+├── evals/
+│   ├── eval-set.json        # Named eval set (12 cases)
+│   └── run-evals.ts         # CI runner (exit 1 on failure)
 │
 ├── web/
 │   └── src/
 │       ├── App.tsx
-│       ├── space/
-│       │   ├── SpaceCanvas.tsx   # Canvas: starfield, ships, beams, task star
-│       │   ├── MissionLog.tsx    # Comms log panel
-│       │   ├── TaskHistory.tsx   # Bottom run history strip
-│       │   ├── agents.ts         # Character definitions, colors, orbits
-│       │   └── useSpaceState.ts  # SSE subscriber → space state
-│       └── hooks/
-│           └── useAgentStream.ts
+│       ├── LandingPage.tsx
+│       ├── DocsPage.tsx
+│       ├── space/           # Canvas, MissionLog, agents, useSpaceState
+│       ├── pages/           # RunPage with Events + Trace tabs
+│       └── components/      # AutonomousPanel, GitStrip
+│
+├── .github/
+│   └── workflows/
+│       └── evals.yml        # CI gate — blocks merge if evals fail
 │
 └── demo/
-    └── bawarchi/
-        ├── oauth-task.ts
-        └── apikey-task.ts
+    └── bawarchi/            # Seeded auth bug tasks
 ```
 
 ---
@@ -134,9 +163,9 @@ Astrophage/
 ## Running It
 
 **Requirements:**
-- Node.js 20+
-- [OpenCode](https://opencode.ai) installed and running (`opencode` in PATH)
-- A running OpenCode server (the TUI counts — Astrophage spawns its own on port 4097)
+- Node.js 22+
+- [OpenCode](https://opencode.ai) installed and running
+- Target repo cloned locally (default: `bawarchi`)
 
 **Install:**
 ```bash
@@ -144,7 +173,7 @@ npm install
 cd web && npm install && cd ..
 ```
 
-**Run the orchestrator (Terminal 1):**
+**Run the backend (Terminal 1):**
 ```bash
 npx tsx src/main.ts
 ```
@@ -154,18 +183,20 @@ npx tsx src/main.ts
 cd web && npm run dev
 ```
 
-Open `http://localhost:5173` — or your Tailscale hostname if forwarded.
+The autonomous loop starts automatically on server boot. Open `http://localhost:5173` to watch.
 
----
+**Configure watched repos:**
 
-## Build Iterations
-
-| Iteration | Status | What |
-|---|---|---|
-| **0** | ✓ Done | Skeleton — Coder + Reviewer, 1 round, SSE server, space UI |
-| **1** | Planned | Tester agent + full convergence loop |
-| **2** | Planned | PM + Architect agents |
-| **3** | Planned | Git agent — full PR lifecycle |
+Create `~/.astrophage/watched-repos.json`:
+```json
+[
+  {
+    "remoteUrl": "https://github.com/your-org/your-repo.git",
+    "localPath": "/path/to/local/clone",
+    "defaultBranch": "main"
+  }
+]
+```
 
 ---
 
@@ -178,13 +209,12 @@ Open `http://localhost:5173` — or your Tailscale hostname if forwarded.
 | Model | `opencode/claude-sonnet-4-6` |
 | Web UI | Vite + React + Canvas 2D |
 | Git operations | `gh` CLI |
-| Target repo | [chinmayrelkar/bawarchi](https://github.com/chinmayrelkar/bawarchi) |
+| CI | GitHub Actions |
 
 ---
 
 ## Related
 
-- [plan.md](./plan.md) — full architecture plan
-- [Bawarchi](https://github.com/chinmayrelkar/bawarchi) — the target repo the agents work on
+- [Bawarchi](https://github.com/chinmayrelkar/bawarchi) — the default watched repo
 - [Project Hail Mary](https://en.wikipedia.org/wiki/Project_Hail_Mary) — the novel the characters come from
 - [OpenCode](https://opencode.ai) — the AI coding agent powering each session
