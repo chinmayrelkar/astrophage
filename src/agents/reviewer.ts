@@ -15,7 +15,12 @@ let _sessionID: string | null = null
 async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    const res = await oc.session.create({ title: "Astrophage Reviewer" })
+    // Deny all tools — reviewer only needs to read the patch text and output JSON.
+    // Without this the model uses file-reading tools and never emits text output.
+    const res = await oc.session.create({
+      title: "Astrophage Reviewer",
+      permission: [{ permission: "*", pattern: "*", action: "deny" }],
+    })
     _sessionID = res.data!.id
 
     await promptAndWait(oc, {
@@ -27,17 +32,17 @@ async function ensureSession(repo: RepoContext): Promise<string> {
 
 ## Your task
 Review code patches proposed by the Coder agent for this repository:
-- Local path: ${repo.localPath}
 - Remote: ${repo.remoteUrl}
 - Default branch: ${repo.defaultBranch}
 ${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} ${pr.url} "${pr.title}"`).join(", ")}` : ""}
 
-The codebase is available in your working directory. You may read files to verify the patch.
+IMPORTANT: Do NOT use any tools. Do NOT read any files. The patch will be provided in full.
+Just read the patch text and respond with JSON.
 
 ${constitutionPrompt()}
 
 ## Output format
-Respond with a JSON object in EXACTLY this format — no other text:
+Respond with a JSON object in EXACTLY this format — no other text, no markdown fences:
 {
   "decision": "accept" | "reject",
   "reason": "<clear explanation>",

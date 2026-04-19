@@ -126,11 +126,12 @@ export async function promptAndWait(
     const messages = res.data ?? []
 
     if (messages.length > beforeCount) {
+      // Find the last assistant message that has a step-finish (i.e. model is done)
       const last = [...messages].reverse().find(
         (m: { info: { role: string }; parts: unknown[] }) => {
           if (m.info.role !== "assistant") return false
-          const parts = m.parts as Array<{ type: string; text?: string }>
-          return parts.some((p) => p.type === "text" && (p.text ?? "").length > 0)
+          const parts = m.parts as Array<{ type: string; text?: string; reason?: string }>
+          return parts.some((p) => p.type === "step-finish" && p.reason === "stop")
         },
       )
       if (last) {
