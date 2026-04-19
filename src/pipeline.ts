@@ -21,7 +21,7 @@ import { reviewPR, approveAndMergePR, closeReviewerSession, resetReviewerSession
 import { runTests, closeTesterSession, resetTesterSession } from "./agents/tester.js"
 import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
-import { closeServer } from "./client.js"
+import { closeServer, setWorkingDirectory } from "./client.js"
 import { startSpan, endSpan } from "./trace.js"
 import { clearTokenStats, getTokenStats } from "./token-tracker.js"
 import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
@@ -51,6 +51,9 @@ export function isPipelineRunning(): boolean {
 export async function runPipeline(task: Task): Promise<PipelineResult> {
   if (_running) throw new Error("A pipeline is already running")
   _running = true
+
+  // Point all agent sessions at this task's repo
+  setWorkingDirectory(task.repo.localPath)
 
   // Fresh sessions for every run
   await resetPMSession()

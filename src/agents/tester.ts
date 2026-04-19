@@ -6,9 +6,7 @@ import { agentTurn, emit } from "../transcript.js"
 
 // ─── Tester Agent (Yao) ───────────────────────────────────────────────────────
 // Looks at the PR diff, writes a Go test file that exercises the fixed behaviour,
-// runs `go test ./...` in /home/ubuntu/bawarchi, and reports pass/fail.
-
-const BAWARCHI_PATH = "/home/ubuntu/bawarchi"
+// runs `go test ./...` in the task repo, and reports pass/fail.
 
 async function getOc(): Promise<OpencodeClient> {
   return getClient()
@@ -39,20 +37,20 @@ async function ensureSession(repo: RepoContext): Promise<string> {
       parts: [{
         type: "text",
         text: `You are Yao, the Tester agent in the Astrophage agent company.
-Your job is to write and run Go tests in the bawarchi repository.
+Your job is to write and run tests for the target repository.
 
 ## Repo
 - Remote: ${repo.remoteUrl}
-- Local path: ${BAWARCHI_PATH}
+- Local path: ${repo.localPath}
 - Default branch: ${repo.defaultBranch}
 
 You have full access: read, edit files, run bash, git, gh CLI.
 
 ## Rules
-- Always work in the directory: ${BAWARCHI_PATH}
+- Always work in the directory: ${repo.localPath}
 - Look at the PR diff to understand what changed.
 - Write a *_test.go file that tests the specific behaviour that was fixed or added.
-- Run \`go test ./...\` in ${BAWARCHI_PATH} to verify the tests.
+- Run \`go test ./...\` in ${repo.localPath} to verify the tests.
 - If there are no Go files to test, that is acceptable — report PASS.
 - Keep tests minimal and focused on the fix.
 - Report PASS or FAIL clearly in your output.`,
@@ -94,11 +92,11 @@ ${criteriaBlock}${hintsBlock}
 Steps:
 1. Read the PR diff: gh pr diff ${pr.number}
 2. Understand what code changed and what behaviour was fixed or added
-3. In the directory ${BAWARCHI_PATH}, write a *_test.go file that:
+3. In the directory ${repo.localPath}, write a *_test.go file that:
    - Tests the specific behaviour that was fixed/added
    - Uses standard Go testing package
    - Has at least one test function that exercises the changed code
-4. Run the tests: cd ${BAWARCHI_PATH} && go test ./...
+4. Run the tests: cd ${repo.localPath} && go test ./...
 5. Report the full output of \`go test ./...\`
 
 If the package has no Go files or no testable code, simply run \`go test ./...\` and report the result.

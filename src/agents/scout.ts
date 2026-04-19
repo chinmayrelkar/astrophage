@@ -2,6 +2,9 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait, registerSession, unregisterSession } from "../client.js"
 import type { Task, RepoContext } from "../types.js"
 import { emit } from "../transcript.js"
+import { readFileSync, existsSync } from "fs"
+import { join } from "path"
+import { homedir } from "os"
 
 // ─── Scout Agent (DuBois) ─────────────────────────────────────────────────────
 // DuBois runs two scan passes per cycle:
@@ -19,13 +22,28 @@ async function getOc(): Promise<OpencodeClient> {
 
 let _sessionID: string | null = null
 
-const WATCHED_REPOS: RepoContext[] = [
+const WATCHED_REPOS_PATH = join(homedir(), ".astrophage", "watched-repos.json")
+
+const DEFAULT_REPOS: RepoContext[] = [
   {
     remoteUrl: "https://github.com/chinmayrelkar/bawarchi.git",
     localPath: "/home/ubuntu/bawarchi",
     defaultBranch: "main",
   },
 ]
+
+function loadWatchedRepos(): RepoContext[] {
+  try {
+    if (existsSync(WATCHED_REPOS_PATH)) {
+      return JSON.parse(readFileSync(WATCHED_REPOS_PATH, "utf8")) as RepoContext[]
+    }
+  } catch {
+    console.warn("[SCOUT] Failed to load watched-repos.json, using defaults")
+  }
+  return [...DEFAULT_REPOS]
+}
+
+const WATCHED_REPOS: RepoContext[] = loadWatchedRepos()
 
 async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()

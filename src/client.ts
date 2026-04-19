@@ -8,8 +8,18 @@ import { startTurn, endTurn, recordDelta, type TurnStats } from "./token-tracker
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
 
 // ─── Directory ────────────────────────────────────────────────────────────────
-// All agent sessions point at the bawarchi repo so the model can read its files.
-const DIR = "/home/ubuntu/bawarchi"
+// All agent sessions use this as their working directory.
+// Set once per pipeline run via setWorkingDirectory() before agents start.
+let DIR = "/home/ubuntu/bawarchi"
+
+/** Set the working directory for all subsequent OpenCode sessions. */
+export function setWorkingDirectory(path: string) {
+  DIR = path
+  // Force re-creation of the client with the new directory on next getClient() call
+  if (_client) {
+    _client = null
+  }
+}
 
 // ─── Shared OpenCode client ───────────────────────────────────────────────────
 //

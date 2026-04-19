@@ -115,7 +115,7 @@ gh pr create --title "fix: <title>" --body "<describe the bug and your fix>" 2>&
 
 STEP 5 — The \`gh pr create\` command prints the PR URL as the last line of output.
 Copy that URL exactly and output it on its own line in this exact format:
-NEW_PR_URL: https://github.com/chinmayrelkar/bawarchi/pull/<NUMBER>
+NEW_PR_URL: ${task.repo.remoteUrl.replace(/\.git$/, "").replace(/.*github\.com\//, "https://github.com/")}/pull/<NUMBER>
 
 The number must be from the PR you JUST created in this session, not any previous PR.`
 
