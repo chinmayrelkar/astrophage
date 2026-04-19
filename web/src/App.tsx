@@ -3,7 +3,7 @@ import { useSpaceState } from "./space/useSpaceState"
 import { SpaceCanvas } from "./space/SpaceCanvas"
 import { MissionLog } from "./space/MissionLog"
 import { TaskHistory } from "./space/TaskHistory"
-import { NewTaskModal } from "./components/NewTaskModal"
+import { AutonomousPanel } from "./components/AutonomousPanel"
 import type { AgentName } from "./hooks/useAgentStream"
 
 export default function App() {
@@ -95,7 +95,7 @@ export default function App() {
               fontFamily: "inherit",
             }}
           >
-            + NEW TASK
+            AUTONOMOUS ⚡
           </button>
 
           <button
@@ -164,7 +164,7 @@ export default function App() {
 
       <TaskHistory runs={runs} onSelect={setSelectedRun} />
 
-      {taskModalOpen && <NewTaskModal onClose={() => setTaskModalOpen(false)} />}
+      {taskModalOpen && <AutonomousPanel onClose={() => setTaskModalOpen(false)} />}
     </div>
   )
 }

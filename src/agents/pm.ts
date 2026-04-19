@@ -54,15 +54,7 @@ into clear subtasks, and produce a structured execution plan for the engineering
 - Default branch: ${repo.defaultBranch}
 
 You have read-only access to the repo. You may read files and run bash to
-understand the codebase, but you never edit source files yourself.
-
-## Rules
-- Be concise and precise. Engineering teams do not want vague plans.
-- Identify the real risk in each task — security, data integrity, edge cases.
-- Your plan directly controls how many rounds the pipeline will use (maxRounds).
-  Do not inflate this: simple fixes = 2-3 rounds, complex changes = 4-5.
-- Focus areas help the coder prioritize. Risk flags help the reviewer be thorough.
-- Acceptance criteria must be testable and specific.`,
+understand the codebase, but you never edit source files yourself.`,
       }],
     })
   }
@@ -78,7 +70,9 @@ export async function planTask(task: Task): Promise<PMPlan> {
   emit("pm", "turn_start", `Analyzing task: ${task.title}`, 0)
   console.log(`\n[PM — Stratt] Planning task: ${task.title}`)
 
-  const prompt = `Analyze the following task and produce an execution plan.
+  // ── Step 1: Explore (free-form, tool use allowed) ──────────────────────────
+  // Give the model room to use tools and think before being asked for JSON.
+  const explorePrompt = `You have a new task to plan. First, explore the repo to understand what needs to change.
 
 ## Task
 Title: ${task.title}
@@ -90,17 +84,27 @@ ${task.description}
 - Local path: ${task.repo.localPath}
 - Remote: ${task.repo.remoteUrl}
 
-## Instructions
-1. Briefly explore the repo if needed to understand the affected code.
-2. Assess complexity: is this a trivial fix, moderate change, or complex refactor?
-3. Break the task into subtasks — each assigned to coder, tester, or reviewer.
-4. Identify focus areas for the coder (what to prioritize / watch out for).
-5. Identify risk flags for the reviewer (security, correctness, edge cases to scrutinize).
-6. Write testable acceptance criteria for the tester.
-7. Decide maxRounds: simple fixes = 2, moderate = 3, complex = 5. Be conservative.
+Explore the repo now. Read the relevant files, identify which files need to change,
+assess the complexity, and identify the security/correctness risks.
+Think out loud — no output format required yet. Just explore and think.`
 
-## Output format
-Output ONLY a raw JSON object (no markdown fences, no commentary before or after):
+  await promptAndWait(oc, {
+    sessionID,
+    parts: [{ type: "text", text: explorePrompt }],
+  })
+
+  // ── Step 2: Produce structured plan JSON ───────────────────────────────────
+  // Separate turn — model has already explored, now just output the plan.
+  const planPrompt = `Good. Now produce the execution plan based on your exploration.
+
+Output a JSON object. Rules:
+- Be concise and precise.
+- maxRounds: simple fixes = 2, moderate = 3, complex = 5. Be conservative.
+- focusAreas: 2-5 items for the coder (what to prioritize / watch out for).
+- riskFlags: 2-5 items for the reviewer (security, correctness, edge cases).
+- acceptanceCriteria per subtask must be testable and specific.
+
+Output ONLY the JSON object on its own, with no text before or after, no markdown fences:
 
 {
   "subtasks": [
@@ -114,16 +118,11 @@ Output ONLY a raw JSON object (no markdown fences, no commentary before or after
   "maxRounds": 3,
   "focusAreas": ["...", "..."],
   "riskFlags": ["...", "..."]
-}
-
-Assignee must be exactly one of: "coder", "tester", "reviewer".
-maxRounds must be an integer between 1 and 5.
-focusAreas: 2-5 items — what the coder should focus on.
-riskFlags: 2-5 items — what the reviewer should scrutinize.`
+}`
 
   const result = await promptAndWait(oc, {
     sessionID,
-    parts: [{ type: "text", text: prompt }],
+    parts: [{ type: "text", text: planPrompt }],
   })
 
   const plan = parsePMPlan(result.text, task)
@@ -148,20 +147,14 @@ riskFlags: 2-5 items — what the reviewer should scrutinize.`
 // ─── Parse and validate the LLM's JSON plan ───────────────────────────────────
 
 function parsePMPlan(text: string, task: Task): PMPlan {
-  const candidates = [
-    // Raw text (model outputs bare JSON)
-    text.trim(),
-    // Fenced code block
-    text.match(/```(?:json)?\s*([\s\S]+?)```/)?.[1]?.trim() ?? "",
-    // First {...} block
-    text.match(/(\{[\s\S]*\})/)?.[1]?.trim() ?? "",
-  ]
+  // Extract all {...} blocks from the text and try each in order of length
+  // (longest first — avoids matching tiny partial objects from tool narration)
+  const jsonCandidates = extractJsonCandidates(text)
 
-  for (const c of candidates) {
-    if (!c) continue
+  for (const c of jsonCandidates) {
     try {
       const p = JSON.parse(c)
-      if (!Array.isArray(p.subtasks)) continue
+      if (!Array.isArray(p.subtasks) || p.subtasks.length === 0) continue
 
       const subtasks = p.subtasks.map((s: Record<string, unknown>, i: number) => ({
         id: String(s["id"] ?? i + 1),
@@ -176,12 +169,14 @@ function parsePMPlan(text: string, task: Task): PMPlan {
       const focusAreas = Array.isArray(p.focusAreas) ? p.focusAreas.map(String) : []
       const riskFlags = Array.isArray(p.riskFlags) ? p.riskFlags.map(String) : []
 
+      console.log(`[PM — Stratt] Plan parsed successfully (${subtasks.length} subtasks)`)
       return { subtasks, maxRounds, focusAreas, riskFlags }
     } catch { /* try next */ }
   }
 
   // Fallback: default sensible plan
   console.warn("[PM — Stratt] Could not parse plan JSON — using default plan")
+  console.warn(`[PM — Stratt] Raw response (first 600 chars): ${text.slice(0, 600)}`)
   return {
     subtasks: [
       {
@@ -195,6 +190,41 @@ function parsePMPlan(text: string, task: Task): PMPlan {
     focusAreas: ["Fix the root cause", "Ensure no regressions"],
     riskFlags: ["Check for edge cases", "Verify error handling"],
   }
+}
+
+/**
+ * Extract all {...} blocks from text, sorted longest-first.
+ * This handles responses where the model outputs tool narration mixed with JSON.
+ */
+function extractJsonCandidates(text: string): string[] {
+  const candidates: string[] = []
+
+  // 1. Fenced code block (```json ... ``` or ``` ... ```)
+  const fenceMatches = text.matchAll(/```(?:json)?\s*([\s\S]+?)```/g)
+  for (const m of fenceMatches) {
+    if (m[1]) candidates.push(m[1].trim())
+  }
+
+  // 2. Every top-level {...} block in the text (scan brace depth)
+  let depth = 0
+  let start = -1
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      if (depth === 0) start = i
+      depth++
+    } else if (text[i] === "}") {
+      depth--
+      if (depth === 0 && start !== -1) {
+        candidates.push(text.slice(start, i + 1))
+        start = -1
+      }
+    }
+  }
+
+  // Sort longest first — the plan object is larger than any incidental {...} in tool output
+  candidates.sort((a, b) => b.length - a.length)
+
+  return candidates
 }
 
 // ─── Session lifecycle ────────────────────────────────────────────────────────

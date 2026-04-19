@@ -54,13 +54,7 @@ hints for the testing strategy.
 - Default branch: ${repo.defaultBranch}
 
 You have read-only access. You may read files and run bash (e.g. grep, find)
-to understand the existing structure, but you never modify files.
-
-## Rules
-- Be precise. Name actual files relative to the repo root.
-- Capture the interface (function signature, struct name, etc.) if it exists.
-- Keep contracts minimal — only touch what is necessary.
-- Test hints should point the Tester at specific functions or scenarios to cover.`,
+to understand the existing structure, but you never modify files.`,
       }],
     })
   }
@@ -80,7 +74,8 @@ export async function deriveContracts(task: Task, plan: PMPlan): Promise<Spec> {
     .map((s) => `  - [${s.assignee}] ${s.description} (criteria: ${s.acceptanceCriteria})`)
     .join("\n")
 
-  const prompt = `You have been given a PM plan for the following task. Derive file contracts.
+  // ── Step 1: Explore (free-form, tool use allowed) ──────────────────────────
+  const explorePrompt = `You have a new task from the PM. First, explore the repo to understand the affected files.
 
 ## Task
 Title: ${task.title}
@@ -98,13 +93,25 @@ Risk flags:  ${plan.riskFlags.join(", ")}
 ## Repo
 - Local path: ${task.repo.localPath}
 
-## Instructions
-1. Explore the repo at ${task.repo.localPath} to identify which files are affected.
-2. For each affected file, describe what must change and capture the current interface.
-3. Produce test hints: which functions/behaviours should the tester specifically cover?
+Explore the repo now. Read the relevant source files, understand the current interfaces,
+identify exactly which files need to change and what their current signatures look like.
+Think out loud — no output format required yet. Just explore.`
 
-## Output format
-Output ONLY a raw JSON object (no markdown fences, no commentary before or after):
+  await promptAndWait(oc, {
+    sessionID,
+    parts: [{ type: "text", text: explorePrompt }],
+  })
+
+  // ── Step 2: Produce structured contracts JSON ──────────────────────────────
+  const contractsPrompt = `Good. Now produce the file contracts based on your exploration.
+
+Output a JSON object. Rules:
+- Only include files that actually need to change.
+- Be precise: use paths relative to the repo root.
+- Capture the current interface (function signature, struct, etc.) if it exists.
+- testHints: 2-5 specific, testable items pointing the Tester at exact functions or scenarios.
+
+Output ONLY the JSON object on its own, with no text before or after, no markdown fences:
 
 {
   "fileContracts": [
@@ -118,13 +125,11 @@ Output ONLY a raw JSON object (no markdown fences, no commentary before or after
     "Test that FunctionName returns X when given Y",
     "Test edge case: empty input"
   ]
-}
-
-Include only files that actually need to change. testHints: 2-5 specific items.`
+}`
 
   const result = await promptAndWait(oc, {
     sessionID,
-    parts: [{ type: "text", text: prompt }],
+    parts: [{ type: "text", text: contractsPrompt }],
   })
 
   const { fileContracts, testHints } = parseContracts(result.text)
@@ -159,14 +164,9 @@ Include only files that actually need to change. testHints: 2-5 specific items.`
 // ─── Parse and validate the LLM's JSON contracts ─────────────────────────────
 
 function parseContracts(text: string): { fileContracts: FileContract[]; testHints: string[] } {
-  const candidates = [
-    text.trim(),
-    text.match(/```(?:json)?\s*([\s\S]+?)```/)?.[1]?.trim() ?? "",
-    text.match(/(\{[\s\S]*\})/)?.[1]?.trim() ?? "",
-  ]
+  const candidates = extractJsonCandidates(text)
 
   for (const c of candidates) {
-    if (!c) continue
     try {
       const p = JSON.parse(c)
       if (!Array.isArray(p.fileContracts) && !Array.isArray(p.testHints)) continue
@@ -187,9 +187,44 @@ function parseContracts(text: string): { fileContracts: FileContract[]; testHint
     } catch { /* try next */ }
   }
 
-  // Fallback: no contracts derived
   console.warn("[ARCHITECT — Ilyukhina] Could not parse contracts JSON — returning empty contracts")
+  console.warn(`[ARCHITECT — Ilyukhina] Raw response (first 600 chars): ${text.slice(0, 600)}`)
   return { fileContracts: [], testHints: [] }
+}
+
+/**
+ * Extract all {...} blocks from text, sorted longest-first.
+ * Handles responses where tool narration is mixed with JSON output.
+ */
+function extractJsonCandidates(text: string): string[] {
+  const candidates: string[] = []
+
+  // 1. Fenced code blocks first
+  const fenceMatches = text.matchAll(/```(?:json)?\s*([\s\S]+?)```/g)
+  for (const m of fenceMatches) {
+    if (m[1]) candidates.push(m[1].trim())
+  }
+
+  // 2. Every top-level {...} block via brace depth scanning
+  let depth = 0
+  let start = -1
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") {
+      if (depth === 0) start = i
+      depth++
+    } else if (text[i] === "}") {
+      depth--
+      if (depth === 0 && start !== -1) {
+        candidates.push(text.slice(start, i + 1))
+        start = -1
+      }
+    }
+  }
+
+  // Sort longest first — the contracts object is larger than any incidental {...}
+  candidates.sort((a, b) => b.length - a.length)
+
+  return candidates
 }
 
 // ─── Session lifecycle ────────────────────────────────────────────────────────

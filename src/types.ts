@@ -6,8 +6,14 @@ export type AgentName =
   | "coder"
   | "reviewer"
   | "tester"
-  | "git"
+  | "scout"
+  | "product"
   | "orchestrator"
+
+// ─── Task types ───────────────────────────────────────────────────────────────
+
+/** bug = fix existing code, feature = build new behaviour, spike = investigate feasibility */
+export type TaskType = "bug" | "feature" | "spike"
 
 // ─── SSE event emitted to the web UI ─────────────────────────────────────────
 
@@ -65,6 +71,47 @@ export interface Task {
   description: string
   /** The repo this task operates on */
   repo: RepoContext
+  /** How this task was sourced */
+  type?: TaskType
+  /** Source reference (issue URL, backlog item id, etc.) */
+  sourceRef?: string
+}
+
+// ─── Product backlog ──────────────────────────────────────────────────────────
+
+export type BacklogPriority = "critical" | "high" | "medium" | "low"
+
+export interface BacklogItem {
+  id: string
+  title: string
+  description: string
+  type: TaskType
+  priority: BacklogPriority
+  /** Source GitHub issue(s) or discussion URLs */
+  sourceRefs: string[]
+  /** Estimated complexity: 1 (trivial) – 5 (very complex) */
+  complexity: number
+  /** If spike: what question needs answering before building */
+  spikeQuestion?: string
+  /** If false, needs a spike before implementation */
+  feasibilityKnown: boolean
+  repo: RepoContext
+  createdAt: string
+  /** Set once a Task has been dispatched for this item */
+  dispatchedAt?: string
+  dispatchedTaskId?: string
+}
+
+export interface Roadmap {
+  version: string
+  generatedAt: string
+  repo: RepoContext
+  themes: Array<{
+    name: string
+    description: string
+    items: string[]  // BacklogItem ids
+  }>
+  backlog: BacklogItem[]
 }
 
 // ─── PM plan produced by Stratt ──────────────────────────────────────────────

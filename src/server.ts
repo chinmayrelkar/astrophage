@@ -7,6 +7,8 @@ import { homedir } from "os"
 import { transcript } from "./transcript.js"
 import { getTraceTree, getSpans } from "./trace.js"
 import { getTokenStats, getTotalCost, getStatsByAgent } from "./token-tracker.js"
+import { startAutonomousLoop, getLoopStatus } from "./autonomous-loop.js"
+import { loadBacklog } from "./agents/product.js"
 import type { AgentEvent, PipelineStatus, RepoContext, Task } from "./types.js"
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
@@ -268,39 +270,23 @@ app.get("/status", (c) => c.json({
   currentRun: _currentRun ? { ..._currentRun, events: undefined } : null,
 }))
 
-app.get("/tasks", async (c) => {
-  const { TASKS } = await import("../demo/index.js")
-  return c.json(
-    Object.entries(TASKS).map(([key, task]) => ({
-      key, id: task.id, title: task.title, description: task.description,
-    })),
-  )
-})
+// ─── Autonomous loop status ───────────────────────────────────────────────────
 
-app.post("/task/submit", async (c) => {
-  const { isPipelineRunning, runPipeline } = await import("./pipeline.js")
-  const { TASKS } = await import("../demo/index.js")
-  if (isPipelineRunning()) return c.json({ error: "A pipeline is already running" }, 409)
-  let key: string
-  try { key = (await c.req.json<{ key: string }>()).key }
-  catch { return c.json({ error: "Invalid JSON body" }, 400) }
-  const task = TASKS[key]
-  if (!task) return c.json({ error: `Unknown task key: "${key}"` }, 404)
-  runPipeline(task).catch((err) => console.error("[ASTROPHAGE] Pipeline error:", err))
-  return c.json({ accepted: true, taskId: task.id }, 202)
-})
+// Full loop status: queue, both agent states, last scan decisions
+app.get("/autonomous/status", (c) => c.json(getLoopStatus()))
 
-app.post("/task", async (c) => {
-  const { isPipelineRunning, runPipeline } = await import("./pipeline.js")
-  if (isPipelineRunning()) return c.json({ error: "A pipeline is already running" }, 409)
-  let task: Task
-  try { task = await c.req.json<Task>() }
-  catch { return c.json({ error: "Invalid JSON body" }, 400) }
-  if (!task.id || !task.title || !task.description || !task.repo)
-    return c.json({ error: "Missing required fields: id, title, description, repo" }, 400)
-  runPipeline(task).catch((err) => console.error("[ASTROPHAGE] Pipeline error:", err))
-  return c.json({ accepted: true, taskId: task.id }, 202)
-})
+// Product backlog
+app.get("/autonomous/backlog", (c) => c.json(loadBacklog()))
+
+// Human task submission is disabled — all tasks come from DuBois and Lokken
+app.post("/task", (c) => c.json({
+  error: "Manual task submission is disabled. Tasks are sourced autonomously by DuBois (bugs) and Lokken (features).",
+  autonomous: true,
+}, 403))
+app.post("/task/submit", (c) => c.json({
+  error: "Manual task submission is disabled. Tasks are sourced autonomously by DuBois (bugs) and Lokken (features).",
+  autonomous: true,
+}, 403))
 
 // ─── Eval results ─────────────────────────────────────────────────────────────
 
@@ -324,6 +310,8 @@ export function startServer(port = 3001): Promise<void> {
     serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
       console.log(`[ASTROPHAGE] Server running at http://127.0.0.1:${port}`)
       console.log(`[ASTROPHAGE] SSE stream at http://127.0.0.1:${port}/events`)
+      // Start autonomous loop — DuBois (bugs) + Lokken (features/roadmap)
+      startAutonomousLoop()
       resolve()
     })
   })

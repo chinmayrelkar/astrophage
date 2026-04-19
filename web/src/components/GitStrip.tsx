@@ -5,7 +5,7 @@ interface Props {
 }
 
 export function GitStrip({ events }: Props) {
-  const gitEvents = events.filter((e) => e.agent === "git" && e.type === "git_action")
+  const gitEvents = events.filter((e) => e.agent === "scout" && e.type === "git_action")
   const last = gitEvents[gitEvents.length - 1]
 
   if (!last) {

@@ -503,7 +503,7 @@ export function LandingPage() {
               { agent: AGENTS.find(a => a.name === "coder")!, step: "03", action: "Implements the fix, iterates on feedback" },
               { agent: AGENTS.find(a => a.name === "tester")!, step: "04", action: "Writes tests, runs them, reports truth — not opinion" },
               { agent: AGENTS.find(a => a.name === "reviewer")!, step: "05", action: "Reviews against a hardcoded constitution. No negotiation on security." },
-              { agent: AGENTS.find(a => a.name === "git")!, step: "06", action: "Branch → commit → PR → merge. Done." },
+              { agent: AGENTS.find(a => a.name === "scout")!, step: "06", action: "Branch → commit → PR → merge. Done." },
             ].map(({ agent, step, action }, i) => (
               <FadeIn key={agent!.name} delay={i * 60}>
                 <div style={{

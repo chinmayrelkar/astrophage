@@ -50,7 +50,7 @@ export interface AgentEvent {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-const ALL_AGENTS: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "git"]
+const ALL_AGENTS: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "scout", "product"]
 
 function initialAgents(): Record<AgentName, AgentState> {
   return Object.fromEntries(
@@ -160,8 +160,8 @@ export function useSpaceState() {
     }
 
     if (type === "git_action") {
-      updateAgent("git", { status: "thinking", round, lastMessage: content })
-      addBeam({ from: "git", to: "orchestrator", message: content, round, type: "status" })
+      updateAgent(agentName, { status: "thinking", round, lastMessage: content })
+      addBeam({ from: agentName, to: "orchestrator", message: content, round, type: "status" })
     }
   }, [addBeam, addLog, updateAgent])
 

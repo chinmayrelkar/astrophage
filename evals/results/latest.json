@@ -1,6 +1,6 @@
 {
-  "runAt": "2026-04-19T09:45:07.017Z",
-  "ref": "feat/evals@d3db2a7",
+  "runAt": "2026-04-19T09:52:39.377Z",
+  "ref": "master@dd94bd8",
   "total": 12,
   "passed": 12,
   "failed": 0,
@@ -12,7 +12,7 @@
       "description": "parseVerdict correctly extracts an ACCEPT decision from a clean reviewer response",
       "passed": true,
       "detail": "decision: got \"accept\", want \"accept\" → OK | nonNegotiable: got false, want false → OK",
-      "durationMs": 0
+      "durationMs": 1
     },
     {
       "id": "reviewer-reject-hardcoded-secret",
@@ -60,7 +60,7 @@
       "description": "parseTestResult correctly identifies a FAIL when go test output contains '--- FAIL'",
       "passed": true,
       "detail": "passed: got false, want false → OK | failures non-empty: 2 failure(s) → OK",
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "tester-pass-no-test-files",

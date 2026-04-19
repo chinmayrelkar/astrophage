@@ -4,7 +4,7 @@ import { apiUrl } from "../api"
 // ─── Types (mirrored from orchestrator/src/types.ts) ─────────────────────────
 
 export type AgentName =
-  | "pm" | "architect" | "coder" | "reviewer" | "tester" | "git" | "orchestrator"
+  | "pm" | "architect" | "coder" | "reviewer" | "tester" | "scout" | "product" | "orchestrator"
 
 export type AgentEventType =
   | "token" | "turn_start" | "turn_end" | "test_result"
@@ -35,7 +35,8 @@ function agentColor(name: AgentName): string {
     coder: "var(--agent-coder)",
     reviewer: "var(--agent-reviewer)",
     tester: "var(--agent-tester)",
-    git: "var(--agent-git)",
+    scout: "var(--agent-git)",
+    product: "var(--agent-pm)",
     orchestrator: "var(--agent-orch)",
   }
   return map[name]
@@ -43,7 +44,7 @@ function agentColor(name: AgentName): string {
 
 export { agentColor }
 
-const ALL_AGENTS: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "git", "orchestrator"]
+const ALL_AGENTS: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "scout", "product", "orchestrator"]
 
 function initialState(): Record<AgentName, AgentState> {
   const state: Partial<Record<AgentName, AgentState>> = {}
@@ -145,15 +146,14 @@ export function useAgentStream() {
     }
 
     if (type === "git_action") {
-      setAgents((prev) => ({
-        ...prev,
-        git: {
-          ...prev.git,
-          status: "thinking",
-          round,
-          lines: [...prev.git.lines, content],
-        },
-      }))
+      setAgents((prev) => {
+        const current = prev[agent]
+        if (!current) return prev
+        return {
+          ...prev,
+          [agent]: { ...current, status: "thinking", round, lines: [...current.lines, content] },
+        }
+      })
     }
   }, [])
 
