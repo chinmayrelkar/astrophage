@@ -3,78 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { AGENTS } from "./space/agents"
 import { StarfieldBackground } from "./space/StarfieldBackground"
 
-interface Props {
-  // kept for potential programmatic use; route-based nav is the default
-  onEnter?: () => void
-}
-
-const PIPELINE = [
-  { role: "PM", name: "Stratt", emoji: "🛸", desc: "Decomposes the task, assigns agents" },
-  { role: "Architect", name: "Ilyukhina", emoji: "📐", desc: "Designs interfaces & file contracts" },
-  { role: "Coder", name: "Ryland Grace", emoji: "🚀", desc: "Implements the fix" },
-  { role: "Tester", name: "Yao", emoji: "🔬", desc: "Writes & runs tests, reports truth" },
-  { role: "Reviewer", name: "Rocky", emoji: "🪨", desc: "Reviews against the constitution" },
-  { role: "Git", name: "DuBois", emoji: "📦", desc: "Branch → commit → PR → merge" },
-]
-
-const CONSTITUTION_NON_NEG = [
-  "No hardcoded secrets, API keys, or client IDs in source",
-  "No credentials passed via URL query parameters",
-  "Auth must never silently succeed — missing env var = hard error",
-  "No plaintext HTTP for token exchange",
-  "OAuth flows must include token refresh logic",
-]
-
-const CONSTITUTION_NEG = [
-  "Env var naming conventions",
-  "Error message wording",
-  "Log level choices",
-  "Code style preferences",
-]
-
-const TECH_STACK = [
-  { layer: "Orchestrator", tech: "TypeScript · tsx · Hono" },
-  { layer: "Agent Sessions", tech: "OpenCode SDK v2" },
-  { layer: "Model", tech: "claude-sonnet-4-6" },
-  { layer: "Web UI", tech: "Vite · React · Canvas 2D" },
-  { layer: "Git Operations", tech: "gh CLI" },
-  { layer: "Target Repo", tech: "chinmayrelkar/bawarchi" },
-]
-
-function useVisible(ref: React.RefObject<Element | null>) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setVisible(true) },
-      { threshold: 0.12 },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-  return visible
-}
-
-function FadeIn({ children, delay = 0, style = {} }: { children: React.ReactNode; delay?: number; style?: React.CSSProperties }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const visible = useVisible(ref)
-  return (
-    <div
-      ref={ref}
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(28px)",
-        transition: `opacity 0.7s ease ${delay}ms, transform 0.7s ease ${delay}ms`,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-// ─── Animated orbit diagram ────────────────────────────────────────────────────
+// ─── Animated orbit diagram ───────────────────────────────────────────────────
 function OrbitDiagram() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -85,65 +14,110 @@ function OrbitDiagram() {
     if (!ctx) return
     let animId: number
     let t = 0
-
-    const center = { x: canvas.width / 2, y: canvas.height / 2 }
+    const W = canvas.width
+    const H = canvas.height
+    const cx = W / 2
+    const cy = H / 2
 
     function draw() {
-      if (!ctx || !canvas) return
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      if (!ctx) return
+      ctx.clearRect(0, 0, W, H)
       t += 0.008
 
-      // Task star glow
-      const grd = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, 38)
-      grd.addColorStop(0, "rgba(255,220,80,0.95)")
-      grd.addColorStop(0.4, "rgba(255,160,30,0.5)")
-      grd.addColorStop(1, "rgba(255,100,0,0)")
+      // subtle nebula behind center
+      const nebula = ctx.createRadialGradient(cx, cy, 0, cx, cy, 160)
+      nebula.addColorStop(0, "rgba(80,40,200,0.12)")
+      nebula.addColorStop(0.5, "rgba(30,10,80,0.06)")
+      nebula.addColorStop(1, "rgba(0,0,0,0)")
       ctx.beginPath()
-      ctx.arc(center.x, center.y, 38, 0, Math.PI * 2)
+      ctx.arc(cx, cy, 160, 0, Math.PI * 2)
+      ctx.fillStyle = nebula
+      ctx.fill()
+
+      // orbit rings
+      for (const agent of AGENTS) {
+        const r = agent.orbitRadius * 0.46
+        ctx.beginPath()
+        ctx.arc(cx, cy, r, 0, Math.PI * 2)
+        ctx.strokeStyle = "rgba(255,255,255,0.05)"
+        ctx.lineWidth = 1
+        ctx.setLineDash([2, 6])
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+
+      // task star
+      const pulse = 1 + Math.sin(t * 2) * 0.08
+      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 32 * pulse)
+      grd.addColorStop(0, "rgba(255,230,80,1)")
+      grd.addColorStop(0.35, "rgba(255,150,20,0.6)")
+      grd.addColorStop(1, "rgba(255,80,0,0)")
+      ctx.beginPath()
+      ctx.arc(cx, cy, 32 * pulse, 0, Math.PI * 2)
       ctx.fillStyle = grd
       ctx.fill()
 
-      // Task label
-      ctx.fillStyle = "rgba(255,220,80,1)"
-      ctx.font = "bold 9px monospace"
+      ctx.fillStyle = "rgba(255,230,80,0.9)"
+      ctx.font = "bold 8px monospace"
       ctx.textAlign = "center"
       ctx.textBaseline = "middle"
-      ctx.fillText("TASK", center.x, center.y)
+      ctx.fillText("TASK", cx, cy)
 
+      // laser beams between adjacent active ships (subtle)
+      const positions: { x: number; y: number; color: string }[] = []
       for (const agent of AGENTS) {
         const angle = agent.orbitPhase + t * agent.orbitSpeed
-        const r = agent.orbitRadius * 0.45 // scale down
-        const x = center.x + Math.cos(angle) * r
-        const y = center.y + Math.sin(angle) * r
+        const r = agent.orbitRadius * 0.46
+        positions.push({
+          x: cx + Math.cos(angle) * r,
+          y: cy + Math.sin(angle) * r,
+          color: agent.color,
+        })
+      }
 
-        // Orbit ring (faint)
-        ctx.beginPath()
-        ctx.arc(center.x, center.y, r, 0, Math.PI * 2)
-        ctx.strokeStyle = "rgba(255,255,255,0.04)"
-        ctx.lineWidth = 1
-        ctx.stroke()
+      // draw one animated laser from ship[0] to ship[1] cycling
+      const beamIdx = Math.floor((t * 0.4) % AGENTS.length)
+      const next = (beamIdx + 1) % AGENTS.length
+      const a = positions[beamIdx]
+      const b = positions[next]
+      const beamAlpha = 0.18 + Math.sin(t * 6) * 0.08
+      const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y)
+      grad.addColorStop(0, a.color + "00")
+      grad.addColorStop(0.5, a.color + Math.round(beamAlpha * 255).toString(16).padStart(2, "0"))
+      grad.addColorStop(1, b.color + "00")
+      ctx.beginPath()
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
+      ctx.strokeStyle = grad
+      ctx.lineWidth = 1.5
+      ctx.stroke()
 
-        // Ship glow
-        const glow = ctx.createRadialGradient(x, y, 0, x, y, 14)
-        glow.addColorStop(0, agent.color + "cc")
+      // ships
+      for (let i = 0; i < AGENTS.length; i++) {
+        const agent = AGENTS[i]
+        const { x, y } = positions[i]
+
+        // glow
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, 18)
+        glow.addColorStop(0, agent.color + "55")
         glow.addColorStop(1, agent.color + "00")
         ctx.beginPath()
-        ctx.arc(x, y, 14, 0, Math.PI * 2)
+        ctx.arc(x, y, 18, 0, Math.PI * 2)
         ctx.fillStyle = glow
         ctx.fill()
 
-        // Ship dot
+        // dot
         ctx.beginPath()
-        ctx.arc(x, y, 5, 0, Math.PI * 2)
+        ctx.arc(x, y, 4.5, 0, Math.PI * 2)
         ctx.fillStyle = agent.color
         ctx.fill()
 
-        // Label
-        ctx.fillStyle = agent.color
+        // label
+        ctx.fillStyle = agent.color + "cc"
         ctx.font = "bold 7px monospace"
         ctx.textAlign = "center"
         ctx.textBaseline = "top"
-        ctx.fillText(agent.name.toUpperCase(), x, y + 8)
+        ctx.fillText(agent.name.toUpperCase(), x, y + 7)
       }
 
       animId = requestAnimationFrame(draw)
@@ -156,101 +130,155 @@ function OrbitDiagram() {
   return (
     <canvas
       ref={canvasRef}
-      width={440}
-      height={440}
-      style={{ display: "block", maxWidth: "100%", margin: "0 auto" }}
+      width={480}
+      height={480}
+      style={{ display: "block", width: "100%", maxWidth: "480px" }}
     />
   )
 }
 
-// ─── Laser beam pipeline visualization ────────────────────────────────────────
-function PipelineArrow() {
+// ─── Typewriter that loops through lines ──────────────────────────────────────
+function Typewriter({ lines }: { lines: string[] }) {
+  const [display, setDisplay] = useState("")
+  const [lineIdx, setLineIdx] = useState(0)
+  const [charIdx, setCharIdx] = useState(0)
+  const [deleting, setDeleting] = useState(false)
+  const [paused, setPaused] = useState(false)
+
+  useEffect(() => {
+    if (paused) {
+      const t = setTimeout(() => { setPaused(false); setDeleting(true) }, 2200)
+      return () => clearTimeout(t)
+    }
+    const speed = deleting ? 18 : 38
+    const t = setTimeout(() => {
+      const line = lines[lineIdx]
+      if (!deleting) {
+        if (charIdx < line.length) {
+          setDisplay(line.slice(0, charIdx + 1))
+          setCharIdx(c => c + 1)
+        } else {
+          setPaused(true)
+        }
+      } else {
+        if (charIdx > 0) {
+          setDisplay(line.slice(0, charIdx - 1))
+          setCharIdx(c => c - 1)
+        } else {
+          setDeleting(false)
+          setLineIdx(i => (i + 1) % lines.length)
+        }
+      }
+    }, speed)
+    return () => clearTimeout(t)
+  }, [charIdx, deleting, paused, lineIdx, lines])
+
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "rgba(255,255,255,0.2)",
-      fontSize: "18px",
-      margin: "0 4px",
-      flexShrink: 0,
-    }}>
-      ──►
+    <span>
+      {display}
+      <span style={{ color: "#00ff87", animation: "blink 1s step-end infinite" }}>|</span>
+    </span>
+  )
+}
+
+// ─── Section fade-in on scroll ────────────────────────────────────────────────
+function FadeIn({ children, delay = 0, style = {} }: {
+  children: React.ReactNode
+  delay?: number
+  style?: React.CSSProperties
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) setVisible(true) },
+      { threshold: 0.1 },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "none" : "translateY(32px)",
+        transition: `opacity 0.8s ease ${delay}ms, transform 0.8s ease ${delay}ms`,
+        ...style,
+      }}
+    >
+      {children}
     </div>
   )
 }
 
-// ─── Main landing page ────────────────────────────────────────────────────────
-export function LandingPage({ onEnter }: Props) {
+// ─── Main ─────────────────────────────────────────────────────────────────────
+export function LandingPage() {
   const navigate = useNavigate()
-  const goToApp = () => { onEnter?.(); navigate("/app") }
-  const [typed, setTyped] = useState("")
-  const tagline = "An agent company — a team of specialized AI that ships code."
 
-  useEffect(() => {
-    let i = 0
-    const id = setInterval(() => {
-      i++
-      setTyped(tagline.slice(0, i))
-      if (i >= tagline.length) clearInterval(id)
-    }, 28)
-    return () => clearInterval(id)
-  }, [])
+  const headlines = [
+    "We replaced the engineering team.",
+    "Bug to merged PR. Zero humans.",
+    "6 AI agents. 1 task. Ship it.",
+  ]
 
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#050510",
+      background: "#04040f",
       color: "#e2e8f0",
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       overflowX: "hidden",
-      position: "relative",
     }}>
       <StarfieldBackground />
 
-      {/* ── Nav ── */}
+      {/* ── NAV ── */}
       <nav style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
+        inset: "0 0 auto 0",
         zIndex: 100,
         display: "flex",
         alignItems: "center",
-        padding: "14px 32px",
-        borderBottom: "1px solid rgba(255,255,255,0.05)",
-        background: "rgba(5,5,16,0.85)",
-        backdropFilter: "blur(12px)",
-        gap: "24px",
+        padding: "12px 28px",
+        background: "rgba(4,4,15,0.7)",
+        backdropFilter: "blur(16px)",
+        borderBottom: "1px solid rgba(255,255,255,0.04)",
       }}>
-        <span style={{ fontWeight: 800, fontSize: "15px", letterSpacing: "0.22em", color: "white" }}>
+        <span style={{ fontWeight: 900, fontSize: "13px", letterSpacing: "0.25em", color: "white" }}>
           ASTROPHAGE
         </span>
-        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.12em" }}>
-          PROJECT HAIL MARY · AGENT COMPANY
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: "16px", alignItems: "center" }}>
-          <a
-            href="https://github.com/chinmayrelkar/bawarchi"
-            target="_blank"
-            rel="noreferrer"
-            style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)", textDecoration: "none", letterSpacing: "0.08em" }}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "20px", alignItems: "center" }}>
+          <button
+            onClick={() => navigate("/docs")}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: "10px", color: "rgba(255,255,255,0.35)",
+              letterSpacing: "0.1em", fontFamily: "inherit",
+              transition: "color 0.2s",
+            }}
+            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
+            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
           >
-            TARGET REPO ↗
-          </a>
+            DOCS
+          </button>
           <a
-            href="https://opencode.ai"
-            target="_blank"
-            rel="noreferrer"
-            style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)", textDecoration: "none", letterSpacing: "0.08em" }}
+            href="https://github.com/chinmayrelkar/astrophage"
+            target="_blank" rel="noreferrer"
+            style={{ fontSize: "10px", color: "rgba(255,255,255,0.35)", textDecoration: "none", letterSpacing: "0.1em", transition: "color 0.2s" }}
+            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
+            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
           >
-            OPENCODE ↗
+            GITHUB ↗
           </a>
           <button
-            onClick={goToApp}
+            onClick={() => navigate("/app")}
             style={{
-              background: "rgba(0,255,135,0.12)",
-              border: "1px solid rgba(0,255,135,0.4)",
+              background: "rgba(0,255,135,0.1)",
+              border: "1px solid rgba(0,255,135,0.35)",
               borderRadius: "4px",
               color: "#00ff87",
               cursor: "pointer",
@@ -258,484 +286,433 @@ export function LandingPage({ onEnter }: Props) {
               letterSpacing: "0.1em",
               padding: "5px 14px",
               fontFamily: "inherit",
-              transition: "background 0.2s",
+              transition: "all 0.2s",
             }}
-            onMouseOver={e => (e.currentTarget.style.background = "rgba(0,255,135,0.22)")}
-            onMouseOut={e => (e.currentTarget.style.background = "rgba(0,255,135,0.12)")}
+            onMouseOver={e => {
+              e.currentTarget.style.background = "rgba(0,255,135,0.2)"
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(0,255,135,0.2)"
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.background = "rgba(0,255,135,0.1)"
+              e.currentTarget.style.boxShadow = "none"
+            }}
           >
-            LAUNCH UI →
+            LAUNCH →
           </button>
         </div>
       </nav>
 
-      {/* ── Hero ── */}
+      {/* ── HERO ── */}
       <section style={{
         position: "relative",
         zIndex: 1,
         minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
         alignItems: "center",
-        justifyContent: "center",
-        padding: "120px 24px 80px",
-        textAlign: "center",
+        gap: "0",
+        padding: "100px 6vw 60px",
+        maxWidth: "1280px",
+        margin: "0 auto",
       }}>
-        <div style={{
-          fontSize: "10px",
-          letterSpacing: "0.28em",
-          color: "rgba(0,255,135,0.7)",
-          marginBottom: "24px",
-          fontWeight: 700,
-        }}>
-          NAMED AFTER THE MICROBE IN PROJECT HAIL MARY
+        {/* Left — copy */}
+        <div>
+          {/* Eyebrow */}
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            background: "rgba(0,255,135,0.06)",
+            border: "1px solid rgba(0,255,135,0.18)",
+            borderRadius: "100px",
+            padding: "4px 14px 4px 8px",
+            marginBottom: "36px",
+          }}>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#00ff87", boxShadow: "0 0 8px #00ff87", display: "inline-block" }} />
+            <span style={{ fontSize: "9px", letterSpacing: "0.2em", color: "#00ff87", fontWeight: 700 }}>
+              INSPIRED BY PROJECT HAIL MARY
+            </span>
+          </div>
+
+          {/* Headline */}
+          <h1 style={{
+            fontSize: "clamp(36px, 4.5vw, 64px)",
+            fontWeight: 900,
+            lineHeight: 1.08,
+            letterSpacing: "-0.01em",
+            color: "white",
+            marginBottom: "28px",
+          }}>
+            An AI team that<br />
+            <span style={{
+              background: "linear-gradient(90deg, #00ff87, #00c8ff)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}>
+              ships your code.
+            </span>
+          </h1>
+
+          {/* Typewriter sub */}
+          <div style={{
+            fontSize: "clamp(13px, 1.4vw, 16px)",
+            color: "rgba(255,255,255,0.38)",
+            minHeight: "1.6em",
+            marginBottom: "48px",
+            letterSpacing: "0.02em",
+          }}>
+            <Typewriter lines={headlines} />
+          </div>
+
+          {/* CTA row */}
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <button
+              onClick={() => navigate("/app")}
+              style={{
+                background: "linear-gradient(135deg, #00ff87, #00c8ff)",
+                border: "none",
+                borderRadius: "6px",
+                color: "#04040f",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                padding: "14px 32px",
+                fontFamily: "inherit",
+                boxShadow: "0 0 40px rgba(0,255,135,0.3)",
+                transition: "all 0.2s",
+              }}
+              onMouseOver={e => {
+                e.currentTarget.style.boxShadow = "0 0 64px rgba(0,255,135,0.5)"
+                e.currentTarget.style.transform = "translateY(-1px)"
+              }}
+              onMouseOut={e => {
+                e.currentTarget.style.boxShadow = "0 0 40px rgba(0,255,135,0.3)"
+                e.currentTarget.style.transform = "none"
+              }}
+            >
+              OPEN MISSION CONTROL
+            </button>
+            <button
+              onClick={() => navigate("/docs")}
+              style={{
+                background: "none",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "6px",
+                color: "rgba(255,255,255,0.4)",
+                cursor: "pointer",
+                fontSize: "11px",
+                letterSpacing: "0.1em",
+                padding: "14px 24px",
+                fontFamily: "inherit",
+                transition: "all 0.2s",
+              }}
+              onMouseOver={e => {
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"
+                e.currentTarget.style.color = "rgba(255,255,255,0.8)"
+              }}
+              onMouseOut={e => {
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"
+                e.currentTarget.style.color = "rgba(255,255,255,0.4)"
+              }}
+            >
+              HOW IT WORKS →
+            </button>
+          </div>
+
+          {/* Social proof line */}
+          <div style={{
+            marginTop: "48px",
+            fontSize: "9px",
+            color: "rgba(255,255,255,0.18)",
+            letterSpacing: "0.12em",
+            display: "flex",
+            gap: "24px",
+          }}>
+            <span>6 SPECIALIZED AGENTS</span>
+            <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
+            <span>AUTONOMOUS PIPELINE</span>
+            <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
+            <span>OPENCODE SDK</span>
+          </div>
         </div>
 
-        <h1 style={{
-          fontSize: "clamp(48px, 8vw, 92px)",
-          fontWeight: 900,
-          letterSpacing: "0.08em",
-          lineHeight: 1,
-          color: "white",
-          marginBottom: "28px",
-          textShadow: "0 0 80px rgba(100,120,255,0.3)",
-        }}>
-          ASTROPHAGE
-        </h1>
-
+        {/* Right — orbit */}
         <div style={{
-          fontSize: "clamp(13px, 1.6vw, 17px)",
-          color: "rgba(255,255,255,0.55)",
-          maxWidth: "560px",
-          minHeight: "2.4em",
-          lineHeight: 1.7,
-          marginBottom: "48px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          position: "relative",
         }}>
-          {typed}
-          <span style={{ animation: "blink 1s step-end infinite", color: "#00ff87" }}>|</span>
-        </div>
-
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
-          <button
-            onClick={goToApp}
-            style={{
-              background: "linear-gradient(135deg, rgba(0,255,135,0.18), rgba(0,200,255,0.12))",
-              border: "1px solid rgba(0,255,135,0.5)",
-              borderRadius: "6px",
-              color: "#00ff87",
-              cursor: "pointer",
-              fontSize: "12px",
-              fontWeight: 700,
-              letterSpacing: "0.15em",
-              padding: "14px 36px",
-              fontFamily: "inherit",
-              transition: "all 0.2s",
-              boxShadow: "0 0 28px rgba(0,255,135,0.15)",
-            }}
-            onMouseOver={e => {
-              e.currentTarget.style.boxShadow = "0 0 48px rgba(0,255,135,0.35)"
-              e.currentTarget.style.background = "linear-gradient(135deg, rgba(0,255,135,0.28), rgba(0,200,255,0.2))"
-            }}
-            onMouseOut={e => {
-              e.currentTarget.style.boxShadow = "0 0 28px rgba(0,255,135,0.15)"
-              e.currentTarget.style.background = "linear-gradient(135deg, rgba(0,255,135,0.18), rgba(0,200,255,0.12))"
-            }}
-          >
-            OPEN SPACE UI →
-          </button>
-          <a
-            href="https://en.wikipedia.org/wiki/Project_Hail_Mary"
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              background: "none",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: "6px",
-              color: "rgba(255,255,255,0.45)",
-              fontSize: "12px",
-              letterSpacing: "0.12em",
-              padding: "14px 28px",
-              textDecoration: "none",
-              transition: "border-color 0.2s, color 0.2s",
-              display: "inline-block",
-            }}
-            onMouseOver={e => {
-              e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"
-              e.currentTarget.style.color = "rgba(255,255,255,0.75)"
-            }}
-            onMouseOut={e => {
-              e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"
-              e.currentTarget.style.color = "rgba(255,255,255,0.45)"
-            }}
-          >
-            READ THE NOVEL ↗
-          </a>
-        </div>
-
-        {/* Scroll nudge */}
-        <div style={{
-          position: "absolute",
-          bottom: "32px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          fontSize: "9px",
-          color: "rgba(255,255,255,0.18)",
-          letterSpacing: "0.15em",
-          animation: "floatY 2.5s ease-in-out infinite",
-        }}>
-          ↓ SCROLL
+          <OrbitDiagram />
         </div>
       </section>
 
-      {/* ── What it does ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 24px" }}>
-        <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
+      {/* ── THE HOOK ── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "100px 6vw" }}>
+        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
           <FadeIn>
-            <div style={{
-              fontSize: "9px",
-              letterSpacing: "0.25em",
-              color: "rgba(255,255,255,0.25)",
-              marginBottom: "12px",
-              textAlign: "center",
-            }}>WHAT IT DOES</div>
-            <h2 style={{
-              fontSize: "clamp(26px, 4vw, 42px)",
+            <blockquote style={{
+              fontSize: "clamp(20px, 2.8vw, 36px)",
               fontWeight: 800,
-              textAlign: "center",
-              marginBottom: "16px",
-              letterSpacing: "0.06em",
-              color: "white",
+              lineHeight: 1.4,
+              color: "rgba(255,255,255,0.85)",
+              borderLeft: "3px solid #00ff87",
+              paddingLeft: "32px",
+              margin: 0,
+              letterSpacing: "-0.01em",
             }}>
-              Bug to Merged PR — Autonomously
-            </h2>
+              "Astrophage is a microbe that eats starlight.<br />
+              <span style={{ color: "rgba(255,255,255,0.4)" }}>
+                We named our AI engineering team after it.
+              </span>"
+            </blockquote>
+            <div style={{ marginTop: "20px", paddingLeft: "35px", fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.15em" }}>
+              — INSPIRED BY ANDY WEIR'S PROJECT HAIL MARY
+            </div>
+          </FadeIn>
+
+          <FadeIn delay={150} style={{ marginTop: "64px" }}>
             <p style={{
-              textAlign: "center",
-              color: "rgba(255,255,255,0.4)",
-              maxWidth: "560px",
-              margin: "0 auto 64px",
-              lineHeight: 1.8,
-              fontSize: "13px",
+              fontSize: "clamp(14px, 1.6vw, 18px)",
+              color: "rgba(255,255,255,0.45)",
+              lineHeight: 1.85,
+              maxWidth: "680px",
             }}>
-              Give Astrophage a task. The agent company takes it from description to merged pull request with no human in the loop.
+              Each agent is a character from the novel — Ryland Grace writes code, Rocky reviews
+              it with no compromise, Stratt runs the mission. They orbit your task in a live 2D
+              space UI and communicate via laser beams. Give them a bug. They ship a PR.
             </p>
           </FadeIn>
-
-          <FadeIn delay={100}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "8px",
-              justifyContent: "center",
-              marginBottom: "56px",
-            }}>
-              {PIPELINE.map((step, i) => (
-                <div key={step.role} style={{ display: "flex", alignItems: "center" }}>
-                  <div style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: "8px",
-                    padding: "14px 18px",
-                    textAlign: "center",
-                    minWidth: "110px",
-                  }}>
-                    <div style={{ fontSize: "20px", marginBottom: "6px" }}>{step.emoji}</div>
-                    <div style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.12em", color: "rgba(255,255,255,0.75)", marginBottom: "4px" }}>{step.role}</div>
-                    <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.25)", letterSpacing: "0.05em" }}>{step.name}</div>
-                  </div>
-                  {i < PIPELINE.length - 1 && <PipelineArrow />}
-                </div>
-              ))}
-            </div>
-          </FadeIn>
-
-          <FadeIn delay={200}>
-            <div style={{
-              background: "rgba(0,0,0,0.35)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "10px",
-              padding: "28px 32px",
-              fontFamily: "monospace",
-              fontSize: "12px",
-              lineHeight: 1.9,
-              color: "rgba(255,255,255,0.55)",
-              maxWidth: "600px",
-              margin: "0 auto",
-            }}>
-              <div style={{ color: "#a78bfa", marginBottom: "4px" }}>PM (Stratt)</div>
-              <div style={{ paddingLeft: "16px" }}>└─► <span style={{ color: "#60a5fa" }}>Architect (Ilyukhina)</span> — designs interfaces</div>
-              <div style={{ paddingLeft: "36px" }}>└─► <span style={{ color: "#00ff87" }}>Coder (Ryland Grace)</span> — implements the fix</div>
-              <div style={{ paddingLeft: "56px" }}>└─► <span style={{ color: "#f472b6" }}>Tester (Yao)</span> — writes and runs tests</div>
-              <div style={{ paddingLeft: "76px" }}>└─► <span style={{ color: "#fbbf24" }}>Reviewer (Rocky)</span> — reviews against constitution</div>
-              <div style={{ paddingLeft: "96px" }}>└─► PASS? ──No──► Coder iterates → loop</div>
-              <div style={{ paddingLeft: "116px" }}>│</div>
-              <div style={{ paddingLeft: "116px" }}>Yes</div>
-              <div style={{ paddingLeft: "116px" }}>└─► <span style={{ color: "#34d399" }}>Git (DuBois)</span> — branch → commit → PR → merge</div>
-            </div>
-          </FadeIn>
         </div>
       </section>
 
-      {/* ── Space UI / Orbit diagram ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "80px 24px" }}>
-        <div style={{ maxWidth: "1000px", margin: "0 auto", display: "flex", flexWrap: "wrap", gap: "64px", alignItems: "center", justifyContent: "center" }}>
-          <FadeIn style={{ flex: "1 1 320px", minWidth: "280px" }}>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(0,200,255,0.6)", marginBottom: "12px" }}>SPACE UI</div>
-            <h2 style={{ fontSize: "clamp(22px, 3vw, 34px)", fontWeight: 800, letterSpacing: "0.06em", color: "white", marginBottom: "20px" }}>
-              Live 2D Space Canvas
-            </h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", color: "rgba(255,255,255,0.45)", fontSize: "12px", lineHeight: 1.8 }}>
-              {[
-                ["Task Star", "The current task glows at the center"],
-                ["Ships", "Each agent orbits at its own radius and speed, glowing when active"],
-                ["Laser Beams", "Animated beams between ships when agents communicate, colour-coded by type"],
-                ["Mission Log", "Right panel — full chronological comms log; click any ship to filter"],
-                ["Task History", "Bottom strip showing all past runs with status, time, and round count"],
-              ].map(([title, desc]) => (
-                <div key={title} style={{ display: "flex", gap: "12px" }}>
-                  <div style={{ color: "#60a5fa", flexShrink: 0, marginTop: "2px" }}>▸</div>
-                  <div>
-                    <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 700 }}>{title}</span>
-                    {" — "}
-                    {desc}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={goToApp}
-              style={{
-                marginTop: "32px",
-                background: "rgba(96,165,250,0.12)",
-                border: "1px solid rgba(96,165,250,0.35)",
-                borderRadius: "5px",
-                color: "#60a5fa",
-                cursor: "pointer",
-                fontSize: "10px",
-                fontWeight: 700,
-                letterSpacing: "0.12em",
-                padding: "10px 24px",
-                fontFamily: "inherit",
-                transition: "background 0.2s",
-              }}
-              onMouseOver={e => (e.currentTarget.style.background = "rgba(96,165,250,0.22)")}
-              onMouseOut={e => (e.currentTarget.style.background = "rgba(96,165,250,0.12)")}
-            >
-              OPEN UI →
-            </button>
-          </FadeIn>
-
-          <FadeIn delay={150} style={{ flex: "0 0 440px", minWidth: "280px" }}>
-            <OrbitDiagram />
-          </FadeIn>
-        </div>
-      </section>
-
-      {/* ── Agents ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 24px" }}>
+      {/* ── THE PIPELINE ── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "80px 6vw" }}>
         <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
           <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.25)", marginBottom: "12px", textAlign: "center" }}>THE CREW</div>
-            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, textAlign: "center", letterSpacing: "0.06em", color: "white", marginBottom: "48px" }}>
-              Characters from Project Hail Mary
-            </h2>
+            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.2)", marginBottom: "40px" }}>
+              THE PIPELINE
+            </div>
           </FadeIn>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
-            {AGENTS.map((agent, i) => (
-              <FadeIn key={agent.name} delay={i * 60}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+            {[
+              { agent: AGENTS.find(a => a.name === "pm")!, step: "01", action: "Decomposes the task into clear engineering specs" },
+              { agent: AGENTS.find(a => a.name === "architect")!, step: "02", action: "Designs file contracts and interfaces before a single line is written" },
+              { agent: AGENTS.find(a => a.name === "coder")!, step: "03", action: "Implements the fix, iterates on feedback" },
+              { agent: AGENTS.find(a => a.name === "tester")!, step: "04", action: "Writes tests, runs them, reports truth — not opinion" },
+              { agent: AGENTS.find(a => a.name === "reviewer")!, step: "05", action: "Reviews against a hardcoded constitution. No negotiation on security." },
+              { agent: AGENTS.find(a => a.name === "git")!, step: "06", action: "Branch → commit → PR → merge. Done." },
+            ].map(({ agent, step, action }, i) => (
+              <FadeIn key={agent!.name} delay={i * 60}>
                 <div style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: `1px solid ${agent.color}28`,
-                  borderRadius: "10px",
-                  padding: "24px",
-                  transition: "border-color 0.2s, background 0.2s",
-                  cursor: "default",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "24px",
+                  padding: "20px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  position: "relative",
                 }}
-                  onMouseOver={e => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = agent.color + "55"
-                    ;(e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.04)"
-                  }}
-                  onMouseOut={e => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = agent.color + "28"
-                    ;(e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.02)"
-                  }}
+                  onMouseOver={e => (e.currentTarget.style.background = "rgba(255,255,255,0.015)")}
+                  onMouseOut={e => (e.currentTarget.style.background = "none")}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-                    <div style={{
-                      width: "36px", height: "36px", borderRadius: "50%",
-                      background: agent.color + "22",
-                      border: `1px solid ${agent.color}55`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: "18px",
-                      flexShrink: 0,
-                    }}>
-                      {agent.emoji}
+                  {/* Step number */}
+                  <div style={{
+                    fontSize: "9px",
+                    color: "rgba(255,255,255,0.12)",
+                    letterSpacing: "0.1em",
+                    width: "28px",
+                    flexShrink: 0,
+                  }}>
+                    {step}
+                  </div>
+
+                  {/* Color bar */}
+                  <div style={{
+                    width: "3px",
+                    height: "40px",
+                    background: agent!.color,
+                    borderRadius: "2px",
+                    flexShrink: 0,
+                    boxShadow: `0 0 12px ${agent!.color}66`,
+                  }} />
+
+                  {/* Agent */}
+                  <div style={{ width: "180px", flexShrink: 0 }}>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: agent!.color, letterSpacing: "0.1em" }}>
+                      {agent!.name.toUpperCase()}
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: "11px", color: agent.color, letterSpacing: "0.1em" }}>
-                        {agent.name.toUpperCase()}
-                      </div>
-                      <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginTop: "2px" }}>
-                        {agent.character} · {agent.ship}
-                      </div>
+                    <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.25)", marginTop: "3px" }}>
+                      {agent!.character} · {agent!.ship}
                     </div>
                   </div>
-                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.45)", lineHeight: 1.7 }}>
-                    {agent.description}
-                  </p>
+
+                  {/* Action */}
+                  <div style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5, flex: 1 }}>
+                    {action}
+                  </div>
                 </div>
               </FadeIn>
             ))}
           </div>
+
+          <FadeIn delay={400}>
+            <div style={{
+              marginTop: "32px",
+              padding: "16px 24px",
+              background: "rgba(0,255,135,0.04)",
+              border: "1px solid rgba(0,255,135,0.12)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              color: "rgba(255,255,255,0.35)",
+              lineHeight: 1.7,
+            }}>
+              <span style={{ color: "#00ff87" }}>Convergence loop:</span>{" "}
+              steps 03–05 repeat until tests pass <em>and</em> Rocky approves — or max rounds are hit and the pipeline exits with <code style={{ color: "rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.05)", padding: "1px 5px", borderRadius: "3px" }}>[UNRESOLVED]</code>.
+            </div>
+          </FadeIn>
         </div>
       </section>
 
-      {/* ── Constitution ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 24px" }}>
-        <div style={{ maxWidth: "840px", margin: "0 auto" }}>
+      {/* ── ROCKY'S RULE ── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "100px 6vw" }}>
+        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
           <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(251,191,36,0.7)", marginBottom: "12px", textAlign: "center" }}>ROCKY'S LAWS</div>
-            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, textAlign: "center", letterSpacing: "0.06em", color: "white", marginBottom: "14px" }}>
-              The Reviewer Constitution
-            </h2>
-            <p style={{ textAlign: "center", color: "rgba(255,255,255,0.35)", maxWidth: "500px", margin: "0 auto 56px", lineHeight: 1.8, fontSize: "12px" }}>
-              Rocky has rules, not opinions. Two tiers: instant blocks and negotiable pushback.
-            </p>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "2px",
+              borderRadius: "12px",
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              {/* Left */}
+              <div style={{
+                background: "rgba(239,68,68,0.06)",
+                padding: "40px",
+                borderRight: "1px solid rgba(255,255,255,0.04)",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                  <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 12px #ef4444" }} />
+                  <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.18em", color: "#ef4444" }}>NON-NEGOTIABLE</span>
+                </div>
+                <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.06em", marginBottom: "28px" }}>
+                  Rocky kills the PR. No rounds. No appeal.
+                </div>
+                {[
+                  "Hardcoded secrets or API keys",
+                  "Credentials in URL query params",
+                  "Auth that silently succeeds on missing env vars",
+                  "Plaintext HTTP for token exchange",
+                  "OAuth without token refresh",
+                ].map(r => (
+                  <div key={r} style={{ display: "flex", gap: "10px", marginBottom: "14px", fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
+                    <span style={{ color: "#ef4444", flexShrink: 0, marginTop: "1px" }}>✕</span>
+                    {r}
+                  </div>
+                ))}
+              </div>
+
+              {/* Right */}
+              <div style={{ background: "rgba(251,191,36,0.04)", padding: "40px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                  <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#fbbf24", boxShadow: "0 0 12px #fbbf24" }} />
+                  <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.18em", color: "#fbbf24" }}>NEGOTIABLE</span>
+                </div>
+                <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.06em", marginBottom: "28px" }}>
+                  Pushback. The coder iterates.
+                </div>
+                {[
+                  "Env var naming conventions",
+                  "Error message wording",
+                  "Log level choices",
+                  "Code style preferences",
+                ].map(r => (
+                  <div key={r} style={{ display: "flex", gap: "10px", marginBottom: "14px", fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
+                    <span style={{ color: "#fbbf24", flexShrink: 0, marginTop: "1px" }}>~</span>
+                    {r}
+                  </div>
+                ))}
+
+                <div style={{
+                  marginTop: "32px",
+                  padding: "14px 16px",
+                  background: "rgba(255,255,255,0.03)",
+                  borderRadius: "6px",
+                  fontSize: "10px",
+                  color: "rgba(255,255,255,0.3)",
+                  lineHeight: 1.6,
+                  fontStyle: "italic",
+                }}>
+                  "Rocky has rules, not opinions."
+                </div>
+              </div>
+            </div>
           </FadeIn>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px" }}>
-            <FadeIn delay={80}>
-              <div style={{
-                background: "rgba(239,68,68,0.04)",
-                border: "1px solid rgba(239,68,68,0.2)",
-                borderRadius: "10px",
-                padding: "28px",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px" }}>
-                  <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 10px #ef4444" }} />
-                  <div style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.15em", color: "#ef4444" }}>NON-NEGOTIABLE</div>
-                </div>
-                <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginBottom: "16px", letterSpacing: "0.05em" }}>
-                  INSTANT BLOCK — NO FURTHER ROUNDS
-                </div>
-                <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {CONSTITUTION_NON_NEG.map(rule => (
-                    <li key={rule} style={{ display: "flex", gap: "10px", fontSize: "11px", color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
-                      <span style={{ color: "#ef4444", flexShrink: 0 }}>✕</span>
-                      {rule}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </FadeIn>
-
-            <FadeIn delay={160}>
-              <div style={{
-                background: "rgba(251,191,36,0.04)",
-                border: "1px solid rgba(251,191,36,0.2)",
-                borderRadius: "10px",
-                padding: "28px",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px" }}>
-                  <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#fbbf24", boxShadow: "0 0 10px #fbbf24" }} />
-                  <div style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.15em", color: "#fbbf24" }}>NEGOTIABLE</div>
-                </div>
-                <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginBottom: "16px", letterSpacing: "0.05em" }}>
-                  PUSHBACK — CODER CAN ITERATE
-                </div>
-                <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {CONSTITUTION_NEG.map(rule => (
-                    <li key={rule} style={{ display: "flex", gap: "10px", fontSize: "11px", color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
-                      <span style={{ color: "#fbbf24", flexShrink: 0 }}>~</span>
-                      {rule}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </FadeIn>
-          </div>
         </div>
       </section>
 
-      {/* ── Demo ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 24px" }}>
-        <div style={{ maxWidth: "840px", margin: "0 auto" }}>
+      {/* ── THE DEMO ── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "80px 6vw" }}>
+        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
           <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.25)", marginBottom: "12px", textAlign: "center" }}>DEMO</div>
-            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, textAlign: "center", letterSpacing: "0.06em", color: "white", marginBottom: "14px" }}>
-              Bawarchi Auth Bugs
-            </h2>
-            <p style={{ textAlign: "center", color: "rgba(255,255,255,0.35)", maxWidth: "520px", margin: "0 auto 56px", lineHeight: 1.8, fontSize: "12px" }}>
-              Two seeded auth bugs in{" "}
-              <a href="https://github.com/chinmayrelkar/bawarchi" target="_blank" rel="noreferrer" style={{ color: "#60a5fa", textDecoration: "none" }}>Bawarchi</a>
-              {" "}— a Go CLI generator. Same constitution, same company. Two tasks, two outcomes.
-            </p>
+            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.2)", marginBottom: "40px" }}>
+              SAME CONSTITUTION · SAME COMPANY · TWO OUTCOMES
+            </div>
           </FadeIn>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
             {[
               {
-                file: "demo/bawarchi/oauth-task.ts",
-                title: "OAuth Task",
+                title: "OAuth Bug",
                 color: "#a78bfa",
-                bug: "gRPC CLI silently skips auth when env var is unset",
-                constitution: "Non-negotiable — auth must never silently succeed",
-                outcome: "3-round negotiation. Coder concedes on error message wording. Reviewer accepts.",
-                badge: "RESOLVED",
+                badge: "3 ROUNDS → RESOLVED",
                 badgeColor: "#00ff87",
+                lines: [
+                  { label: "Bug", text: "gRPC CLI silently skips auth when env var is missing" },
+                  { label: "Rule", text: "Non-negotiable: auth must never silently succeed" },
+                  { label: "Result", text: "Coder concedes on error message wording. Rocky accepts." },
+                ],
               },
               {
-                file: "demo/bawarchi/apikey-task.ts",
-                title: "API Key Task",
+                title: "API Key Bug",
                 color: "#f472b6",
-                bug: "API key appended as URL query parameter",
-                constitution: "Non-negotiable — credentials must never appear in URLs",
-                outcome: "Reviewer kills it in round 1. No negotiation.",
-                badge: "INSTANT BLOCK",
+                badge: "ROUND 1 → INSTANT BLOCK",
                 badgeColor: "#ef4444",
+                lines: [
+                  { label: "Bug", text: "API key appended as a URL query parameter" },
+                  { label: "Rule", text: "Non-negotiable: credentials must never appear in URLs" },
+                  { label: "Result", text: "Rocky kills the PR in round 1. No negotiation." },
+                ],
               },
-            ].map((demo, i) => (
-              <FadeIn key={demo.title} delay={i * 100}>
+            ].map(demo => (
+              <FadeIn key={demo.title}>
                 <div style={{
                   background: "rgba(255,255,255,0.02)",
-                  border: `1px solid ${demo.color}28`,
+                  border: `1px solid ${demo.color}22`,
                   borderRadius: "10px",
                   padding: "28px",
+                  height: "100%",
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: demo.color, letterSpacing: "0.08em" }}>{demo.title}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 700, color: demo.color }}>{demo.title}</div>
                     <div style={{
-                      fontSize: "8px",
-                      fontWeight: 700,
-                      letterSpacing: "0.1em",
+                      fontSize: "8px", fontWeight: 700, letterSpacing: "0.1em",
                       color: demo.badgeColor,
-                      border: `1px solid ${demo.badgeColor}55`,
+                      border: `1px solid ${demo.badgeColor}44`,
                       borderRadius: "3px",
-                      padding: "2px 7px",
+                      padding: "3px 8px",
                     }}>
                       {demo.badge}
                     </div>
                   </div>
-
-                  <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.1em", marginBottom: "6px" }}>BUG</div>
-                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: "16px" }}>{demo.bug}</p>
-
-                  <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.1em", marginBottom: "6px" }}>CONSTITUTION</div>
-                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: "16px" }}>{demo.constitution}</p>
-
-                  <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.1em", marginBottom: "6px" }}>OUTCOME</div>
-                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: "20px" }}>{demo.outcome}</p>
-
-                  <div style={{
-                    background: "rgba(0,0,0,0.3)",
-                    borderRadius: "4px",
-                    padding: "8px 12px",
-                    fontSize: "9px",
-                    color: "rgba(255,255,255,0.25)",
-                    fontFamily: "monospace",
-                  }}>
-                    {demo.file}
-                  </div>
+                  {demo.lines.map(l => (
+                    <div key={l.label} style={{ marginBottom: "16px" }}>
+                      <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.18)", letterSpacing: "0.12em", marginBottom: "4px" }}>{l.label.toUpperCase()}</div>
+                      <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>{l.text}</div>
+                    </div>
+                  ))}
                 </div>
               </FadeIn>
             ))}
@@ -743,100 +720,87 @@ export function LandingPage({ onEnter }: Props) {
         </div>
       </section>
 
-      {/* ── Tech Stack ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 24px" }}>
-        <div style={{ maxWidth: "700px", margin: "0 auto" }}>
-          <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.25)", marginBottom: "12px", textAlign: "center" }}>UNDER THE HOOD</div>
-            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, textAlign: "center", letterSpacing: "0.06em", color: "white", marginBottom: "48px" }}>
-              Tech Stack
-            </h2>
-          </FadeIn>
-
-          <FadeIn delay={80}>
-            <div style={{
-              background: "rgba(255,255,255,0.02)",
-              border: "1px solid rgba(255,255,255,0.07)",
-              borderRadius: "10px",
-              overflow: "hidden",
-            }}>
-              {TECH_STACK.map((row, i) => (
-                <div key={row.layer} style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "16px 24px",
-                  borderBottom: i < TECH_STACK.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                }}>
-                  <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)", letterSpacing: "0.1em" }}>{row.layer.toUpperCase()}</div>
-                  <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>{row.tech}</div>
-                </div>
-              ))}
-            </div>
-          </FadeIn>
-        </div>
-      </section>
-
-      {/* ── CTA Footer ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "120px 24px", textAlign: "center" }}>
+      {/* ── FINAL CTA ── */}
+      <section style={{ position: "relative", zIndex: 1, padding: "140px 6vw 120px", textAlign: "center" }}>
         <FadeIn>
-          <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(0,255,135,0.5)", marginBottom: "16px" }}>READY FOR LAUNCH</div>
-          <h2 style={{ fontSize: "clamp(28px, 5vw, 56px)", fontWeight: 900, letterSpacing: "0.08em", color: "white", marginBottom: "20px" }}>
-            Watch the Company Work
+          <div style={{
+            display: "inline-block",
+            fontSize: "9px",
+            letterSpacing: "0.25em",
+            color: "rgba(0,255,135,0.5)",
+            marginBottom: "24px",
+          }}>
+            READY FOR LAUNCH
+          </div>
+          <h2 style={{
+            fontSize: "clamp(32px, 5vw, 64px)",
+            fontWeight: 900,
+            color: "white",
+            letterSpacing: "-0.01em",
+            lineHeight: 1.1,
+            marginBottom: "24px",
+          }}>
+            Watch the crew work.
           </h2>
-          <p style={{ color: "rgba(255,255,255,0.35)", maxWidth: "420px", margin: "0 auto 40px", lineHeight: 1.8, fontSize: "13px" }}>
-            Open the live space UI — ships orbit, lasers fly, agents converge.
+          <p style={{
+            fontSize: "15px",
+            color: "rgba(255,255,255,0.3)",
+            marginBottom: "48px",
+            lineHeight: 1.8,
+          }}>
+            Ships orbit. Lasers fly. Code ships.
           </p>
           <button
-            onClick={goToApp}
+            onClick={() => navigate("/app")}
             style={{
-              background: "linear-gradient(135deg, rgba(0,255,135,0.2), rgba(0,200,255,0.14))",
-              border: "1px solid rgba(0,255,135,0.5)",
+              background: "linear-gradient(135deg, #00ff87, #00c8ff)",
+              border: "none",
               borderRadius: "8px",
-              color: "#00ff87",
+              color: "#04040f",
               cursor: "pointer",
               fontSize: "13px",
-              fontWeight: 800,
-              letterSpacing: "0.18em",
-              padding: "18px 48px",
+              fontWeight: 900,
+              letterSpacing: "0.16em",
+              padding: "20px 56px",
               fontFamily: "inherit",
-              boxShadow: "0 0 40px rgba(0,255,135,0.2)",
-              transition: "all 0.2s",
+              boxShadow: "0 0 60px rgba(0,255,135,0.35)",
+              transition: "all 0.25s",
             }}
             onMouseOver={e => {
-              e.currentTarget.style.boxShadow = "0 0 70px rgba(0,255,135,0.4)"
-              e.currentTarget.style.background = "linear-gradient(135deg, rgba(0,255,135,0.32), rgba(0,200,255,0.22))"
+              e.currentTarget.style.boxShadow = "0 0 100px rgba(0,255,135,0.55)"
+              e.currentTarget.style.transform = "translateY(-2px) scale(1.02)"
             }}
             onMouseOut={e => {
-              e.currentTarget.style.boxShadow = "0 0 40px rgba(0,255,135,0.2)"
-              e.currentTarget.style.background = "linear-gradient(135deg, rgba(0,255,135,0.2), rgba(0,200,255,0.14))"
+              e.currentTarget.style.boxShadow = "0 0 60px rgba(0,255,135,0.35)"
+              e.currentTarget.style.transform = "none"
             }}
           >
-            OPEN SPACE UI →
+            OPEN MISSION CONTROL →
           </button>
         </FadeIn>
       </section>
 
-      {/* Footer */}
+      {/* ── FOOTER ── */}
       <footer style={{
         position: "relative",
         zIndex: 1,
-        borderTop: "1px solid rgba(255,255,255,0.05)",
-        padding: "28px 32px",
+        borderTop: "1px solid rgba(255,255,255,0.04)",
+        padding: "24px 28px",
         display: "flex",
         flexWrap: "wrap",
         gap: "16px",
         alignItems: "center",
         justifyContent: "space-between",
         fontSize: "9px",
-        color: "rgba(255,255,255,0.18)",
-        letterSpacing: "0.08em",
+        color: "rgba(255,255,255,0.15)",
+        letterSpacing: "0.1em",
       }}>
-        <div>ASTROPHAGE · PROJECT HAIL MARY · AGENT COMPANY</div>
+        <div>ASTROPHAGE · AGENT COMPANY · PROJECT HAIL MARY</div>
         <div style={{ display: "flex", gap: "20px" }}>
-          <a href="https://opencode.ai" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.18)", textDecoration: "none" }}>OPENCODE</a>
-          <a href="https://github.com/chinmayrelkar/bawarchi" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.18)", textDecoration: "none" }}>BAWARCHI</a>
-          <a href="https://en.wikipedia.org/wiki/Project_Hail_Mary" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.18)", textDecoration: "none" }}>THE NOVEL</a>
+          <button onClick={() => navigate("/docs")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "9px", color: "rgba(255,255,255,0.15)", letterSpacing: "0.1em", fontFamily: "inherit" }}>DOCS</button>
+          <a href="https://github.com/chinmayrelkar/astrophage" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>GITHUB</a>
+          <a href="https://en.wikipedia.org/wiki/Project_Hail_Mary" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>THE NOVEL</a>
+          <a href="https://opencode.ai" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>OPENCODE</a>
         </div>
       </footer>
     </div>
