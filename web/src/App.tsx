@@ -5,6 +5,7 @@ import { AgentPanel } from "./components/AgentPanel"
 import { ConvergenceBar } from "./components/ConvergenceBar"
 import { GitStrip } from "./components/GitStrip"
 import { RunHistory } from "./components/RunHistory"
+import { TaskStrip } from "./components/TaskStrip"
 
 const AGENT_LABELS: Record<string, string> = {
   pm: "PM",
@@ -83,6 +84,9 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Task strip */}
+      <TaskStrip />
 
       {/* Agent panels */}
       <div

@@ -11,6 +11,7 @@ export default defineConfig({
       "/transcript": "http://127.0.0.1:3001",
       "/health": "http://127.0.0.1:3001",
       "/runs": "http://127.0.0.1:3001",
+      "/task": "http://127.0.0.1:3001",
     },
   },
 })
