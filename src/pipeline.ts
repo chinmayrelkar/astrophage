@@ -4,8 +4,8 @@
  * Can also be imported directly for CLI use.
  */
 
-import { proposeInitialFix, closeCoderSession, resetCoderSession } from "./agents/coder.js"
-import { reviewPatch, closeReviewerSession, resetReviewerSession } from "./agents/reviewer.js"
+import { proposeInitialFix, commitAndPR, closeCoderSession, resetCoderSession } from "./agents/coder.js"
+import { reviewPatch, approvePR, closeReviewerSession, resetReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
@@ -67,9 +67,22 @@ async function runIteration0(task: Task): Promise<PipelineResult> {
 
   // Print verdict
   console.log("\n" + "═".repeat(70))
+  let prUrl: string | null = null
   if (verdict.decision === "accept") {
-    console.log("  [VERDICT] ACCEPTED")
-    emit("orchestrator", "convergence", "ACCEPTED — patch approved by reviewer", round)
+    console.log("  [VERDICT] ACCEPTED — shipping to GitHub...")
+    emit("orchestrator", "convergence", "ACCEPTED — coder is opening PR", round)
+
+    // Coder branches, commits, pushes, opens PR
+    prUrl = await commitAndPR(task, patch)
+
+    if (prUrl) {
+      // Reviewer approves and merges
+      await approvePR(prUrl)
+      emit("orchestrator", "convergence", `MERGED — ${prUrl}`, round)
+      console.log(`  [MERGED] ${prUrl}`)
+    } else {
+      emit("orchestrator", "convergence", "ACCEPTED — PR creation failed", round)
+    }
   } else {
     const tag = verdict.nonNegotiable ? "[NON-NEGOTIABLE BLOCK]" : "[REJECT — NEGOTIABLE]"
     console.log(`  [VERDICT] ${tag}`)
@@ -90,6 +103,7 @@ async function runIteration0(task: Task): Promise<PipelineResult> {
   return {
     taskId: task.id,
     status: verdict.decision === "accept" ? "merged" : "unresolved",
+    prUrl: prUrl ?? undefined,
     rounds: [
       {
         number: round,

@@ -156,6 +156,46 @@ function parseVerdict(result: { text: string; structured: unknown }, round: numb
   }
 }
 
+/** Approve the PR on GitHub using gh CLI */
+export async function approvePR(prUrl: string): Promise<void> {
+  const oc = await getOc()
+
+  // Create a separate one-shot session with bash allowed for gh CLI
+  const res = await oc.session.create({
+    title: "Astrophage Reviewer — PR Approval",
+    permission: [
+      { permission: "bash", pattern: "*", action: "allow" },
+    ],
+  })
+  const sessionID = res.data!.id
+
+  emit("reviewer", "turn_start", `Approving PR ${prUrl}`, 0)
+  console.log(`\n[REVIEWER] Approving PR: ${prUrl}`)
+
+  await promptAndWait(oc, {
+    sessionID,
+    parts: [{
+      type: "text",
+      text: `You are Rocky, the Reviewer agent. The coder's fix has been approved by your review.
+Now approve the GitHub PR and merge it.
+
+PR URL: ${prUrl}
+
+Run these commands:
+1. gh pr review ${prUrl} --approve --body "Fix looks good. Approving."
+2. gh pr merge ${prUrl} --squash --delete-branch
+
+Output the result of each command.`,
+    }],
+  })
+
+  agentTurn("reviewer", "PR approved and merged", prUrl, 0)
+  emit("reviewer", "git_action", `PR approved and merged: ${prUrl}`, 0)
+
+  // Clean up one-shot session
+  await oc.session.delete({ sessionID }).catch(() => {})
+}
+
 export async function closeReviewerSession() {
   const oc = await getOc()
   if (_sessionID) {
