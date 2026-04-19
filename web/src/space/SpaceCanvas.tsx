@@ -161,27 +161,32 @@ export function SpaceCanvas({ agents, beams, currentRound, task, onShipClick }: 
       ctx.fillText(agent.emoji, sx, sy)
       ctx.globalAlpha = 1
 
+      // Role label (small caps above character name)
+      ctx.font = `bold 7px 'JetBrains Mono', monospace`
+      ctx.fillStyle = isBlocked ? "#f87171" : hexToRgba(agent.color, isActive ? 0.7 : 0.35)
+      ctx.textBaseline = "alphabetic"
+      ctx.fillText(agent.role, sx, sy + bodyR + 11)
+
       // Character name
       ctx.font = `bold ${isActive ? 10 : 9}px 'JetBrains Mono', monospace`
       ctx.fillStyle = isBlocked ? "#f87171" : isActive ? agent.color : "rgba(255,255,255,0.5)"
-      ctx.textBaseline = "alphabetic"
-      ctx.fillText(agent.character, sx, sy + bodyR + 14)
+      ctx.fillText(agent.character, sx, sy + bodyR + 22)
 
       // Ship name (smaller, dimmer)
       ctx.font = "8px 'JetBrains Mono', monospace"
       ctx.fillStyle = "rgba(255,255,255,0.25)"
-      ctx.fillText(agent.ship, sx, sy + bodyR + 24)
+      ctx.fillText(agent.ship, sx, sy + bodyR + 32)
 
-      // Role description (dimmer still, only when active or done)
+      // Description (only when active or done)
       if (isActive || isDone) {
         ctx.font = "7px 'JetBrains Mono', monospace"
         ctx.fillStyle = isActive
           ? hexToRgba(agent.color, 0.45)
           : "rgba(255,255,255,0.15)"
-        const desc = agent.description.length > 36
-          ? agent.description.slice(0, 34) + "…"
+        const desc = agent.description.length > 38
+          ? agent.description.slice(0, 36) + "…"
           : agent.description
-        ctx.fillText(desc, sx, sy + bodyR + 35)
+        ctx.fillText(desc, sx, sy + bodyR + 43)
       }
 
       // Last message bubble

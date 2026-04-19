@@ -58,7 +58,7 @@ interface CostBreakdown {
 
 // ─── Agent metadata helpers (single source of truth: agents.ts) ──────────────
 
-const ORCHESTRATOR = { color: "#94a3b8", character: "Mission Control", emoji: "🌌", ship: "—", description: "Coordinates the full pipeline." }
+const ORCHESTRATOR = { role: "ORCHESTRATOR", color: "#94a3b8", character: "Mission Control", emoji: "🌌", ship: "—", description: "Coordinates the full pipeline." }
 
 function agentMeta(name: string) {
   return AGENT_MAP[name as keyof typeof AGENT_MAP] ?? ORCHESTRATOR
@@ -106,8 +106,9 @@ function TraceNodeRow({ node, depth }: { node: TraceNode; depth: number }) {
           }} />
         )}
         <span style={{ fontSize: "13px", flexShrink: 0 }}>{meta.emoji}</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "8px", color: meta.color, fontWeight: 700, letterSpacing: "0.08em", opacity: 0.65 }}>{meta.role}</span>
             <span style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</span>
             {node.round > 0 && (
               <span style={{
@@ -391,9 +392,10 @@ export function RunPage() {
                         <span style={{ fontSize: "14px", flexShrink: 0, marginTop: "1px" }}>{meta.emoji}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
-                            <div>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
+                              <span style={{ fontSize: "8px", color: meta.color, fontWeight: 700, letterSpacing: "0.08em", opacity: 0.65 }}>{meta.role}</span>
                               <span style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</span>
-                              <span style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", marginLeft: "6px" }}>{meta.description}</span>
+                              <span style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)" }}>{meta.description}</span>
                             </div>
                             <span style={{
                               fontSize: "8px", padding: "1px 5px",
@@ -486,8 +488,11 @@ export function RunPage() {
                         borderRadius: "0 4px 4px 0",
                       }}>
                         <span style={{ fontSize: "11px", flexShrink: 0 }}>{meta.emoji}</span>
-                        <div style={{ flexShrink: 0, width: "140px" }}>
-                          <div style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</div>
+                        <div style={{ flexShrink: 0, width: "150px" }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
+                            <span style={{ fontSize: "8px", color: meta.color, fontWeight: 700, letterSpacing: "0.08em", opacity: 0.65 }}>{meta.role}</span>
+                            <span style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</span>
+                          </div>
                           <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.25)" }}>{meta.description}</div>
                         </div>
                         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", width: "50px", flexShrink: 0 }}>{a.turns} turn{a.turns !== 1 ? "s" : ""}</span>

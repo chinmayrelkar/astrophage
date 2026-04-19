@@ -4,6 +4,8 @@ import type { AgentName } from "../hooks/useAgentStream"
 
 export interface AgentCharacter {
   name: AgentName
+  /** Short role label shown as a prefix in all UI surfaces, e.g. "PM", "CODER" */
+  role: string
   character: string
   ship: string
   emoji: string
@@ -17,6 +19,7 @@ export interface AgentCharacter {
 export const AGENTS: AgentCharacter[] = [
   {
     name: "coder",
+    role: "CODER",
     character: "Ryland Grace",
     ship: "Hail Mary",
     emoji: "🚀",
@@ -24,10 +27,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 180,
     orbitSpeed: 0.18,
     orbitPhase: 0,
-    description: "Astronaut-scientist. Implements fixes, writes code, iterates.",
+    description: "Implements fixes, writes code, opens PRs, iterates on feedback.",
   },
   {
     name: "reviewer",
+    role: "REVIEWER",
     character: "Rocky",
     ship: "Eridian Vessel",
     emoji: "🪨",
@@ -35,10 +39,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 240,
     orbitSpeed: 0.13,
     orbitPhase: Math.PI * 0.7,
-    description: "Alien engineer. Reviews code against the constitution. No compromise.",
+    description: "Reviews PRs against the constitution. Approves or blocks. No compromise.",
   },
   {
     name: "pm",
+    role: "PM",
     character: "Stratt",
     ship: "Command Station",
     emoji: "🛸",
@@ -46,10 +51,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 300,
     orbitSpeed: 0.09,
     orbitPhase: Math.PI * 1.3,
-    description: "Mission director. Decomposes tasks, assigns work, drives convergence.",
+    description: "Decomposes tasks into a plan, sets maxRounds, injects focus areas and risk flags.",
   },
   {
     name: "tester",
+    role: "TESTER",
     character: "Yao",
     ship: "Research Module",
     emoji: "🔬",
@@ -57,10 +63,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 260,
     orbitSpeed: 0.11,
     orbitPhase: Math.PI * 1.9,
-    description: "Crew specialist. Writes tests, runs them, reports truth.",
+    description: "Writes Go tests for the fix, runs them, reports pass or fail.",
   },
   {
     name: "architect",
+    role: "ARCHITECT",
     character: "Ilyukhina",
     ship: "Blueprint Pod",
     emoji: "📐",
@@ -68,10 +75,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 200,
     orbitSpeed: 0.15,
     orbitPhase: Math.PI * 0.4,
-    description: "Systems engineer. Designs interfaces and file contracts before coding starts.",
+    description: "Designs file contracts and interfaces before the coder touches anything.",
   },
   {
     name: "scout",
+    role: "SCOUT",
     character: "DuBois",
     ship: "Scout Probe",
     emoji: "🛰️",
@@ -79,10 +87,11 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 320,
     orbitSpeed: 0.07,
     orbitPhase: Math.PI * 1.1,
-    description: "Scout. Finds bugs in code and GitHub issues, feeds the pipeline.",
+    description: "Scans GitHub issues and the codebase for bugs and violations to fix.",
   },
   {
     name: "product",
+    role: "PRODUCT",
     character: "Lokken",
     ship: "Observatory",
     emoji: "🔭",
@@ -90,7 +99,7 @@ export const AGENTS: AgentCharacter[] = [
     orbitRadius: 360,
     orbitSpeed: 0.05,
     orbitPhase: Math.PI * 0.2,
-    description: "Product. Reads feedback, builds backlog, writes roadmap, queues features.",
+    description: "Reads user feedback, prioritises the backlog, writes the roadmap, queues features.",
   },
 ]
 

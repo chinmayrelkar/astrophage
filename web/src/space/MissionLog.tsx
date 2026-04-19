@@ -56,8 +56,13 @@ export function MissionLog({ log, agents, selectedAgent, onClose }: Props) {
           <>
             <span style={{ fontSize: "20px" }}>{agentInfo.emoji}</span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: "12px", color: agentInfo.color }}>
-                {agentInfo.character}
+              <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+                <span style={{ fontSize: "8px", fontWeight: 700, color: agentInfo.color, letterSpacing: "0.1em", opacity: 0.7 }}>
+                  {agentInfo.role}
+                </span>
+                <span style={{ fontWeight: 700, fontSize: "12px", color: agentInfo.color }}>
+                  {agentInfo.character}
+                </span>
               </div>
               <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.35)" }}>
                 {agentInfo.ship} · {agentInfo.description}
@@ -152,6 +157,11 @@ export function MissionLog({ log, agents, selectedAgent, onClose }: Props) {
                 {/* Content */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "2px" }}>
+                    {char?.role && (
+                      <span style={{ fontSize: "7px", color, fontWeight: 700, letterSpacing: "0.08em", opacity: 0.6 }}>
+                        {char.role}
+                      </span>
+                    )}
                     <span style={{ fontSize: "9px", color, fontWeight: 700 }}>
                       {char?.character ?? "MISSION CTRL"}
                     </span>
