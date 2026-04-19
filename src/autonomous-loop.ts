@@ -15,6 +15,7 @@ import { runScout, getWatchedRepos, type ScoutResult } from "./agents/scout.js"
 import { runProductCycle, loadBacklog, saveBacklog, type ProductCycleResult } from "./agents/product.js"
 import { runPipeline, isPipelineRunning } from "./pipeline.js"
 import { emit } from "./transcript.js"
+import { loadLoopControlState, type LoopControlState } from "./loop-state.js"
 import type { Task, BacklogItem, TaskType } from "./types.js"
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -44,6 +45,10 @@ function saveQueue(q: Task[]): void {
   writeFileSync(QUEUE_PATH, JSON.stringify(q, null, 2))
 }
 
+// Loop control (pause/resume) — state lives in ./loop-state.ts, filesystem only.
+// The public HTTP API and web UI have READ-ONLY visibility via /autonomous/status.
+// Mutate via `npm run pause` / `npm run resume` on the host.
+
 // ─── In-memory state ──────────────────────────────────────────────────────────
 
 let _seenKeys:       Set<string>       = loadSeenKeys()
@@ -56,11 +61,16 @@ let _nextScoutAt:    Date | null       = null
 let _nextProductAt:  Date | null       = null
 let _lastScoutResult:   ScoutResult | null        = null
 let _lastProductResult: ProductCycleResult | null = null
+let _control:        LoopControlState  = loadLoopControlState()
+let _lastControlCheck = 0
 
 // ─── Status API ───────────────────────────────────────────────────────────────
 
 export interface LoopStatus {
   running: boolean
+  paused: boolean
+  pausedAt: string | null
+  pauseReason: string | null
   scoutRunning: boolean
   productRunning: boolean
   watchedRepos: string[]
@@ -80,8 +90,13 @@ export interface LoopStatus {
 }
 
 export function getLoopStatus(): LoopStatus {
+  // Re-read control file so status reflects external edits without waiting for a tick
+  _control = loadLoopControlState()
   return {
     running: _loopStarted,
+    paused: _control.paused,
+    pausedAt: _control.pausedAt,
+    pauseReason: _control.pauseReason,
     scoutRunning: _scoutRunning,
     productRunning: _productRunning,
     watchedRepos: getWatchedRepos().map((r) => r.remoteUrl),
@@ -216,6 +231,28 @@ let _lastProductTick = 0
 async function tick(): Promise<void> {
   const now = Date.now()
 
+  // Re-read the control file at most once every 5s. This is the sole mechanism
+  // by which an operator pauses/resumes the loop — no HTTP/UI surface exists.
+  if (now - _lastControlCheck > 5_000) {
+    _lastControlCheck = now
+    const prev = _control.paused
+    _control = loadLoopControlState()
+    if (_control.paused && !prev) {
+      console.log(`[LOOP] PAUSED at ${_control.pausedAt}${_control.pauseReason ? ` — ${_control.pauseReason}` : ""}`)
+      emit("scout", "git_action", `Autonomous loop PAUSED${_control.pauseReason ? `: ${_control.pauseReason}` : ""}`, 0)
+      _nextScoutAt = null
+      _nextProductAt = null
+    } else if (!_control.paused && prev) {
+      console.log(`[LOOP] RESUMED`)
+      emit("scout", "git_action", "Autonomous loop RESUMED", 0)
+      // Reset tick counters so Scout/Product fire promptly after resume
+      _lastScoutTick = 0
+      _lastProductTick = 0
+    }
+  }
+
+  if (_control.paused) return
+
   // Dispatch any queued work (non-blocking check)
   await dispatchNext()
 
@@ -241,12 +278,18 @@ export function startAutonomousLoop(): void {
   _loopStarted = true
 
   console.log(`\n${"═".repeat(60)}`)
-  console.log(`  ASTROPHAGE — Autonomous loop starting`)
+  console.log(`  ASTROPHAGE — Autonomous loop starting${_control.paused ? " (PAUSED)" : ""}`)
   console.log(`  Scout interval  : ${SCOUT_INTERVAL_MS / 1000}s (DuBois — bugs + violations)`)
   console.log(`  Product interval: ${PRODUCT_INTERVAL_MS / 1000}s (Lokken — features + roadmap)`)
   console.log(`  Queue on disk   : ${_queue.length} task(s)`)
   console.log(`  Backlog         : ${_backlog.length} item(s)`)
   console.log(`  Seen keys       : ${_seenKeys.size}`)
+  if (_control.paused) {
+    console.log(`  STATE           : PAUSED since ${_control.pausedAt}${_control.pauseReason ? ` (${_control.pauseReason})` : ""}`)
+    console.log(`  Resume with     : npm run resume`)
+  } else {
+    console.log(`  STATE           : RUNNING — pause with 'npm run pause'`)
+  }
   console.log(`${"═".repeat(60)}\n`)
 
   // Kick both cycles immediately on start, then tick every 30s

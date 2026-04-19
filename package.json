@@ -6,6 +6,8 @@
     "start": "tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "submit": "tsx src/submit.ts",
+    "pause": "tsx src/pause.ts",
+    "resume": "tsx src/resume.ts",
     "eval": "tsx evals/run-evals.ts"
   },
   "dependencies": {
