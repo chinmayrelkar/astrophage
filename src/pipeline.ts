@@ -112,11 +112,11 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   } catch (err) {
     console.error("[ASTROPHAGE] Pipeline error:", err)
     emit("orchestrator", "convergence", `ERROR: ${String(err)}`, 0)
-    finishRun("unresolved")
+    finishRun("unresolved", undefined)
     throw err
   } finally {
     _running = false
-    finishRun(finalStatus)
+    finishRun(finalStatus, pr?.url)
     await closeCoderSession()
     await closeReviewerSession()
     closeServer()
