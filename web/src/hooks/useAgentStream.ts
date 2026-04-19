@@ -22,7 +22,7 @@ export type AgentStatus = "idle" | "thinking" | "done" | "blocked"
 export interface AgentState {
   name: AgentName
   status: AgentStatus
-  lines: string[]      // accumulated content lines
+  lines: string[]
   lastVerdict?: string
   round: number
 }
@@ -42,11 +42,11 @@ function agentColor(name: AgentName): string {
 
 export { agentColor }
 
-const AGENT_NAMES: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "git"]
+const ALL_AGENTS: AgentName[] = ["pm", "architect", "coder", "reviewer", "tester", "git", "orchestrator"]
 
 function initialState(): Record<AgentName, AgentState> {
   const state: Partial<Record<AgentName, AgentState>> = {}
-  for (const name of [...AGENT_NAMES, "orchestrator" as AgentName]) {
+  for (const name of ALL_AGENTS) {
     state[name] = { name, status: "idle", lines: [], round: 0 }
   }
   return state as Record<AgentName, AgentState>
@@ -60,97 +60,116 @@ export function useAgentStream() {
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [connected, setConnected] = useState(false)
 
-  // Stable updater — always uses functional setState so no stale closure on agents
-  const updateAgent = useCallback((name: AgentName, update: Partial<AgentState>) => {
-    setAgents((prev) => ({
-      ...prev,
-      [name]: { ...prev[name], ...update },
-    }))
-  }, [])
+  const handleEvent = useCallback((event: AgentEvent) => {
+    setEvents((prev) => [...prev, event])
 
-  // handleEvent never closes over agents state — all mutations go through
-  // functional setState updaters that receive fresh prev state.
-  const handleEvent = useCallback(
-    (event: AgentEvent) => {
-      setEvents((prev) => [...prev, event])
+    const { agent, type, content, round } = event
 
-      const { agent, type, content, round } = event
+    if (type === "round_start") {
+      setCurrentRound(round)
+      return
+    }
 
-      if (type === "round_start") {
-        setCurrentRound(round)
-        return
-      }
+    // turn_start: mark agent as thinking AND show the label as a line
+    if (type === "turn_start") {
+      setAgents((prev) => ({
+        ...prev,
+        [agent]: {
+          ...prev[agent],
+          status: "thinking",
+          round,
+          lines: content ? [...prev[agent].lines, `▶ ${content}`] : prev[agent].lines,
+        },
+      }))
+      return
+    }
 
-      if (type === "turn_start") {
-        updateAgent(agent, { status: "thinking", round })
-        return
-      }
+    // turn_end: mark done and show the full content
+    if (type === "turn_end") {
+      setAgents((prev) => ({
+        ...prev,
+        [agent]: {
+          ...prev[agent],
+          status: "done",
+          round,
+          lines: content ? [...prev[agent].lines, content] : prev[agent].lines,
+        },
+      }))
+      return
+    }
 
-      if (type === "turn_end") {
-        // Single functional setState — appends content to existing lines
+    if (type === "verdict") {
+      try {
+        const v = JSON.parse(content)
+        const isBlock = v.nonNegotiable
         setAgents((prev) => ({
           ...prev,
           [agent]: {
             ...prev[agent],
-            status: "done",
-            round,
-            lines: [...prev[agent].lines, content],
-          },
-        }))
-        return
-      }
-
-      if (type === "verdict") {
-        try {
-          const v = JSON.parse(content)
-          const isBlock = v.nonNegotiable
-          updateAgent(agent, {
             status: isBlock ? "blocked" : v.decision === "accept" ? "done" : "thinking",
             lastVerdict: `${v.decision.toUpperCase()}${v.nonNegotiable ? " [HARD]" : ""}: ${v.reason}`,
-          })
-        } catch {
-          updateAgent(agent, { lastVerdict: content })
-        }
-        return
-      }
-
-      if (type === "convergence") {
-        // Use functional setState to avoid stale closure on orchestrator lines
-        setAgents((prev) => ({
-          ...prev,
-          orchestrator: {
-            ...prev.orchestrator,
-            status: content.startsWith("ACCEPT") ? "done" : "blocked",
-            lines: [...prev.orchestrator.lines, content],
           },
         }))
-        return
-      }
-
-      if (type === "token") {
+      } catch {
         setAgents((prev) => ({
           ...prev,
-          [agent]: {
-            ...prev[agent],
-            status: "thinking",
-            round,
-            lines: [...prev[agent].lines, content],
-          },
+          [agent]: { ...prev[agent], lastVerdict: content },
         }))
       }
-    },
-    [updateAgent], // no longer depends on agents — all reads go through prev
-  )
+      return
+    }
 
-  // Stable ref to handleEvent so the EventSource listener is set up once
-  // and always calls the latest version without recreating the source.
+    if (type === "convergence") {
+      setAgents((prev) => ({
+        ...prev,
+        orchestrator: {
+          ...prev.orchestrator,
+          status: content.startsWith("ACCEPT") ? "done" : "blocked",
+          lines: [...prev.orchestrator.lines, content],
+        },
+      }))
+      return
+    }
+
+    if (type === "token") {
+      setAgents((prev) => ({
+        ...prev,
+        [agent]: {
+          ...prev[agent],
+          status: "thinking",
+          round,
+          lines: [...prev[agent].lines, content],
+        },
+      }))
+    }
+
+    if (type === "git_action") {
+      setAgents((prev) => ({
+        ...prev,
+        git: {
+          ...prev.git,
+          status: "thinking",
+          round,
+          lines: [...prev.git.lines, content],
+        },
+      }))
+    }
+  }, [])
+
   const handleEventRef = useRef(handleEvent)
   handleEventRef.current = handleEvent
 
   useEffect(() => {
     const source = new EventSource("/events")
 
+    // onopen fires before any messages — safe place to mark connected
+    source.onopen = () => setConnected(true)
+    source.onerror = () => setConnected(false)
+
+    // ping is sent as the first SSE event — also mark connected here
+    // in case onopen already fired and we missed it
     source.addEventListener("ping", () => setConnected(true))
+
     source.addEventListener("agent_event", (e: MessageEvent) => {
       try {
         const event: AgentEvent = JSON.parse(e.data)
@@ -160,11 +179,8 @@ export function useAgentStream() {
       }
     })
 
-    source.onerror = () => setConnected(false)
-    source.onopen = () => setConnected(true)
-
     return () => source.close()
-  }, []) // stable: EventSource created once, ref always points to latest handler
+  }, [])
 
   return { agents, currentRound, events, connected }
 }
