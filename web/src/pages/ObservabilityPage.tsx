@@ -86,7 +86,7 @@ function timeUntil(iso: string | null): string {
 function computeAgentCosts(runs: RunSummary[]): AgentCostRow[] {
   const byAgent: Record<string, { turns: number; outputChars: number }> = {}
   for (const run of runs) {
-    for (const e of run.events) {
+    for (const e of (run.events ?? [])) {
       if (!byAgent[e.agent]) byAgent[e.agent] = { turns: 0, outputChars: 0 }
       if (e.type === "turn_start") byAgent[e.agent].turns++
       if (e.type === "token") byAgent[e.agent].outputChars += (e.content?.length ?? 0)
@@ -116,11 +116,34 @@ export function ObservabilityPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadRuns = () =>
-      fetch(apiUrl("/runs"))
-        .then((r) => r.ok ? r.json() : [])
-        .then((d) => { setRuns(d as RunSummary[]); setLoading(false) })
-        .catch(() => setLoading(false))
+    const loadRuns = async () => {
+      try {
+        // Fetch the run list (no events)
+        const listRes = await fetch(apiUrl("/runs"))
+        if (!listRes.ok) { setLoading(false); return }
+        const list = (await listRes.json()) as RunSummary[]
+
+        // Fetch full data for each run (with events) for cost computation
+        // Only fetch runs we don't already have events for
+        const full = await Promise.all(
+          list.map(async (r) => {
+            const existing = runs.find((er) => er.id === r.id && (er.events?.length ?? 0) > 0)
+            if (existing && r.status !== "running") return existing
+            try {
+              const res = await fetch(apiUrl(`/runs/${r.id}`))
+              if (!res.ok) return { ...r, events: [] }
+              return (await res.json()) as RunSummary
+            } catch {
+              return { ...r, events: [] }
+            }
+          }),
+        )
+        setRuns(full)
+        setLoading(false)
+      } catch {
+        setLoading(false)
+      }
+    }
 
     const loadLoop = () =>
       fetch(apiUrl("/autonomous/status"))
@@ -130,7 +153,7 @@ export function ObservabilityPage() {
 
     loadRuns()
     loadLoop()
-    const i1 = setInterval(loadRuns, 10_000)
+    const i1 = setInterval(loadRuns, 15_000)
     const i2 = setInterval(loadLoop, 5_000)
     return () => { clearInterval(i1); clearInterval(i2) }
   }, [])
@@ -386,7 +409,7 @@ export function ObservabilityPage() {
                   : null
                 // Compute cost from events
                 let outChars = 0
-                for (const e of run.events) {
+                for (const e of (run.events ?? [])) {
                   if (e.type === "token") outChars += (e.content?.length ?? 0)
                 }
                 const cost = (outChars / 4) * 15 / 1_000_000
