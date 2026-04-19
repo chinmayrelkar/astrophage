@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { streamSSE } from "hono/streaming"
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "fs"
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, appendFileSync, unlinkSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
 import { transcript } from "./transcript.js"
@@ -16,19 +16,63 @@ import type { AgentEvent, PipelineStatus, RepoContext, Task } from "./types.js"
 const RUNS_DIR = join(homedir(), ".astrophage", "runs")
 mkdirSync(RUNS_DIR, { recursive: true })
 
+function runPath(runId: string) {
+  return join(RUNS_DIR, `${runId}.json`)
+}
+
+/** Write the full run record to disk (used at start and finish). */
 function persistRun(run: RunRecord) {
   try {
-    writeFileSync(join(RUNS_DIR, `${run.id}.json`), JSON.stringify(run, null, 2))
+    writeFileSync(runPath(run.id), JSON.stringify(run, null, 2))
   } catch (e) {
     console.error("[ASTROPHAGE] Failed to persist run:", e)
   }
 }
 
+/**
+ * Append a single event to the run's on-disk event log incrementally.
+ * We maintain a parallel `.events.ndjson` file — one JSON event per line —
+ * so a crash loses no events. On load we merge it back into the run record.
+ */
+function appendEventToDisk(runId: string, event: AgentEvent) {
+  try {
+    appendFileSync(join(RUNS_DIR, `${runId}.events.ndjson`), JSON.stringify(event) + "\n")
+  } catch { /* non-fatal */ }
+}
+
+function loadEventsFromDisk(runId: string): AgentEvent[] {
+  try {
+    const raw = readFileSync(join(RUNS_DIR, `${runId}.events.ndjson`), "utf8")
+    return raw.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as AgentEvent)
+  } catch {
+    return []
+  }
+}
+
 function loadPersistedRuns(): RunRecord[] {
   try {
-    return readdirSync(RUNS_DIR)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => JSON.parse(readFileSync(join(RUNS_DIR, f), "utf8")) as RunRecord)
+    const files = readdirSync(RUNS_DIR).filter((f) => f.endsWith(".json"))
+    return files
+      .map((f) => {
+        try {
+          const run = JSON.parse(readFileSync(join(RUNS_DIR, f), "utf8")) as RunRecord
+          // Merge any incremental events written after the last full persist
+          const diskEvents = loadEventsFromDisk(run.id)
+          if (diskEvents.length > run.events.length) {
+            run.events = diskEvents
+          }
+          // Mark any run that was still "running" at shutdown as unresolved
+          if (run.status === "running") {
+            run.status = "unresolved"
+            run.finishedAt = run.finishedAt ?? new Date().toISOString()
+            persistRun(run)
+          }
+          return run
+        } catch {
+          return null
+        }
+      })
+      .filter((r): r is RunRecord => r !== null)
       .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
   } catch {
     return []
@@ -88,11 +132,17 @@ export function startRun(taskId: string, taskTitle: string): RunRecord {
   _currentRun = run
   runs.push(run)
 
+  // Persist run record immediately so it survives a crash
+  persistRun(run)
+
   transcript.subscribe((event) => {
-    if (_currentRun === run) {
-      run.events.push(event)
-      if (event.type === "round_start") run.rounds = event.round
-    }
+    if (_currentRun !== run) return
+    run.events.push(event)
+    if (event.type === "round_start") run.rounds = event.round
+    // Write every event to disk as it arrives — no data loss on restart
+    appendEventToDisk(run.id, event)
+    // Re-persist the full record every 10 events to keep status/rounds current
+    if (run.events.length % 10 === 0) persistRun(run)
   })
 
   return run
@@ -104,6 +154,8 @@ export function finishRun(status: PipelineStatus, prUrl?: string) {
     _currentRun.finishedAt = new Date().toISOString()
     if (prUrl) _currentRun.prUrl = prUrl
     persistRun(_currentRun)
+    // Remove the incremental sidecar — the full JSON is now the source of truth
+    try { unlinkSync(join(RUNS_DIR, `${_currentRun.id}.events.ndjson`)) } catch { /* ok */ }
     _currentRun = null
   }
 }
