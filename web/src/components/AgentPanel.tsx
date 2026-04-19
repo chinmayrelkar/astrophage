@@ -79,10 +79,21 @@ export function AgentPanel({ agent, label }: Props) {
         }}
       >
         {agent.lines.length === 0 ? (
-          <span style={{ color: "var(--text-dim)" }}>waiting...</span>
+          <span style={{ color: agent.status === "thinking" ? color : "var(--text-dim)", opacity: 0.5 }}>
+            {agent.status === "thinking" ? "working..." : "waiting..."}
+          </span>
         ) : (
           agent.lines.map((line, i) => (
-            <div key={i} style={{ marginBottom: "4px" }}>
+            <div
+              key={i}
+              style={{
+                marginBottom: "4px",
+                color: line.startsWith("▶ ")
+                  ? color
+                  : "var(--text-secondary)",
+                opacity: i === agent.lines.length - 1 ? 1 : 0.7,
+              }}
+            >
               {line}
             </div>
           ))
