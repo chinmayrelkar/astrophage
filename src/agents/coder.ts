@@ -141,7 +141,12 @@ export async function iterateFix(
 export async function closeCoderSession() {
   const oc = await getOc()
   if (_sessionID) {
-    await oc.session.delete({ sessionID: _sessionID })
+    await oc.session.delete({ sessionID: _sessionID }).catch(() => {})
     _sessionID = null
   }
+}
+
+/** Reset before a new pipeline run — ensures a fresh session with clean context */
+export async function resetCoderSession() {
+  await closeCoderSession()
 }
