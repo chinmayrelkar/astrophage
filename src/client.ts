@@ -23,18 +23,20 @@ let _serverClose: (() => void) | null = null
 export async function getClient(): Promise<OpencodeClient> {
   if (_client) return _client
 
+  const dir = process.cwd()
+
   // 1. Check if the TUI injected a server URL
   const envURL = process.env["OPENCODE_SERVER_URL"]
   if (envURL) {
-    console.log(`[ASTROPHAGE] Connecting to existing OpenCode server at ${envURL}`)
-    _client = createOpencodeClient({ baseUrl: envURL })
+    console.log(`[ASTROPHAGE] Connecting to existing OpenCode server at ${envURL} (dir: ${dir})`)
+    _client = createOpencodeClient({ baseUrl: envURL, directory: dir })
     return _client
   }
 
   // 2. Probe the default port
   if (await probe(DEFAULT_URL)) {
-    console.log(`[ASTROPHAGE] Connecting to existing OpenCode server at ${DEFAULT_URL}`)
-    _client = createOpencodeClient({ baseUrl: DEFAULT_URL })
+    console.log(`[ASTROPHAGE] Connecting to existing OpenCode server at ${DEFAULT_URL} (dir: ${dir})`)
+    _client = createOpencodeClient({ baseUrl: DEFAULT_URL, directory: dir })
     return _client
   }
 
@@ -43,7 +45,7 @@ export async function getClient(): Promise<OpencodeClient> {
   const server = await createOpencodeServer({ hostname: "127.0.0.1" })
   _serverClose = server.close
   console.log(`[ASTROPHAGE] OpenCode server started at ${server.url}`)
-  _client = createOpencodeClient({ baseUrl: server.url })
+  _client = createOpencodeClient({ baseUrl: server.url, directory: dir })
   return _client
 }
 
