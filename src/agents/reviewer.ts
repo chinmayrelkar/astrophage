@@ -143,7 +143,7 @@ gh pr merge ${pr.number} --squash --delete-branch --yes`,
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseVerdict(text: string, round: number): ReviewVerdict {
+export function parseVerdict(text: string, round: number): ReviewVerdict {
   const candidates = [
     text.trim(),
     text.match(/```(?:json)?\s*([\s\S]+?)```/)?.[1]?.trim() ?? "",

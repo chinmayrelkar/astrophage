@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { streamSSE } from "hono/streaming"
-import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "fs"
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
 import { transcript } from "./transcript.js"
@@ -190,6 +190,23 @@ app.post("/task", async (c) => {
     return c.json({ error: "Missing required fields: id, title, description, repo" }, 400)
   runPipeline(task).catch((err) => console.error("[ASTROPHAGE] Pipeline error:", err))
   return c.json({ accepted: true, taskId: task.id }, 202)
+})
+
+// ─── Eval results ─────────────────────────────────────────────────────────────
+
+// Resolved relative to CWD (project root) — consistent whether run via tsx or compiled
+const EVALS_LATEST_PATH = join(process.cwd(), "evals", "results", "latest.json")
+
+app.get("/evals/latest", (c) => {
+  if (!existsSync(EVALS_LATEST_PATH)) {
+    return c.json({ error: "No eval results found. Run `npm run eval` first." }, 404)
+  }
+  try {
+    const raw = readFileSync(EVALS_LATEST_PATH, "utf8")
+    return c.json(JSON.parse(raw))
+  } catch (err) {
+    return c.json({ error: `Failed to read eval results: ${String(err)}` }, 500)
+  }
 })
 
 export function startServer(port = 3001): Promise<void> {

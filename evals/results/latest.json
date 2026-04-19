@@ -1,0 +1,112 @@
+{
+  "runAt": "2026-04-19T09:45:07.017Z",
+  "ref": "feat/evals@d3db2a7",
+  "total": 12,
+  "passed": 12,
+  "failed": 0,
+  "passRate": 1,
+  "cases": [
+    {
+      "id": "reviewer-accept-clean-pr",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict correctly extracts an ACCEPT decision from a clean reviewer response",
+      "passed": true,
+      "detail": "decision: got \"accept\", want \"accept\" → OK | nonNegotiable: got false, want false → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "reviewer-reject-hardcoded-secret",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict correctly detects a NON-NEGOTIABLE rejection when a hardcoded secret is present",
+      "passed": true,
+      "detail": "decision: got \"reject\", want \"reject\" → OK | nonNegotiable: got true, want true → OK | violatedRule contains \"hardcoded\": \"No hardcoded secrets, API keys, or client_ids in source code\" → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "reviewer-reject-negotiable-style",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict extracts a negotiable REJECT (e.g. naming convention) and sets nonNegotiable to false",
+      "passed": true,
+      "detail": "decision: got \"reject\", want \"reject\" → OK | nonNegotiable: got false, want false → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "reviewer-parse-fenced-json",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict handles JSON wrapped in markdown code fences (common LLM output pattern)",
+      "passed": true,
+      "detail": "decision: got \"accept\", want \"accept\" → OK | nonNegotiable: got false, want false → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "reviewer-parse-fallback-on-garbage",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict returns a synthetic reject verdict when the agent response contains no valid JSON — prevents the pipeline from hanging",
+      "passed": true,
+      "detail": "decision: got \"reject\", want \"reject\" → OK | reason starts with \"Could not parse\": \"Could not parse reviewer response: I looked at the code. It seems fine to me. No\" → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "tester-pass-explicit",
+      "category": "tester-parsing",
+      "description": "parseTestResult correctly identifies a PASS when the agent outputs 'ok' and ends with PASS",
+      "passed": true,
+      "detail": "passed: got true, want true → OK | failures.length: got 0, want 0 → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "tester-fail-explicit",
+      "category": "tester-parsing",
+      "description": "parseTestResult correctly identifies a FAIL when go test output contains '--- FAIL'",
+      "passed": true,
+      "detail": "passed: got false, want false → OK | failures non-empty: 2 failure(s) → OK",
+      "durationMs": 1
+    },
+    {
+      "id": "tester-pass-no-test-files",
+      "category": "tester-parsing",
+      "description": "parseTestResult treats 'no test files' as a pass — not every package has tests",
+      "passed": true,
+      "detail": "passed: got true, want true → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "pipeline-convergence-accept-round1",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a pass+accept in round 1 immediately sets status to 'merged'",
+      "passed": true,
+      "detail": "finalStatus: got \"merged\", want \"merged\" → OK | roundsConsumed: got 1, want 1 → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "pipeline-convergence-nonneg-block",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a non-negotiable reject on round 1 sets status to 'unresolved' and stops immediately",
+      "passed": true,
+      "detail": "finalStatus: got \"unresolved\", want \"unresolved\" → OK | roundsConsumed: got 1, want 1 → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "pipeline-convergence-max-rounds",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: repeated negotiable rejects exhaust MAX_ROUNDS and result in 'unresolved'",
+      "passed": true,
+      "detail": "finalStatus: got \"unresolved\", want \"unresolved\" → OK | roundsConsumed: got 5, want 5 → OK",
+      "durationMs": 0
+    },
+    {
+      "id": "pipeline-convergence-test-fail-then-pass",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a test failure on round 1 followed by pass+accept on round 2 results in 'merged'",
+      "passed": true,
+      "detail": "finalStatus: got \"merged\", want \"merged\" → OK | roundsConsumed: got 2, want 2 → OK",
+      "durationMs": 0
+    }
+  ],
+  "regression": {
+    "regressions": [],
+    "improvements": [],
+    "newCases": [],
+    "hasRegressions": false
+  }
+}
