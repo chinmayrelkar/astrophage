@@ -15,6 +15,8 @@ import { runTests, closeTesterSession, resetTesterSession } from "./agents/teste
 import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
+import { startSpan, endSpan } from "./trace.js"
+import { clearTokenStats } from "./token-tracker.js"
 import type { Task, PipelineResult } from "./types.js"
 
 const MAX_ROUNDS = 5
@@ -35,7 +37,14 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   await resetTesterSession()
 
   setCurrentTask({ id: task.id, title: task.title, description: task.description, repo: task.repo })
-  startRun(task.id, task.title)
+  const run = startRun(task.id, task.title)
+  const runId = run.id
+
+  // Clear any leftover token stats from previous runs
+  clearTokenStats()
+
+  // Root trace span: orchestrator
+  const rootSpanId = startSpan(runId, "orchestrator", 0, `Pipeline: ${task.title}`)
 
   console.log("\n" + "█".repeat(70))
   console.log("  ASTROPHAGE — Pipeline starting")
@@ -51,17 +60,27 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       roundStart(round)
 
       // ── Coder ────────────────────────────────────────────────────────────
+      const coderSpanId = startSpan(runId, "coder", round,
+        round === 1 ? "Explore, fix, open PR" : `Iterate on PR feedback (round ${round})`,
+        rootSpanId,
+      )
       if (round === 1) {
         // First round: explore, fix, open PR
         pr = await proposeAndOpenPR(task, round)
+        endSpan(runId, coderSpanId)
         console.log(`\n[PIPELINE] PR opened: ${pr.url}`)
       } else {
         // Subsequent rounds: read review comments, update, force-push
         await iterateOnPRFeedback(task, pr!, round)
+        endSpan(runId, coderSpanId)
       }
 
       // ── Tester ───────────────────────────────────────────────────────────
+      const testerSpanId = startSpan(runId, "tester", round,
+        `Run tests for PR #${pr!.number}`, rootSpanId,
+      )
       const testResult = await runTests(pr!, task.repo, round)
+      endSpan(runId, testerSpanId)
 
       if (!testResult.passed) {
         const failSummary = testResult.failures.slice(0, 3).join("; ") || "see output"
@@ -86,7 +105,11 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       }
 
       // ── Reviewer ─────────────────────────────────────────────────────────
+      const reviewerSpanId = startSpan(runId, "reviewer", round,
+        `Review PR #${pr!.number}`, rootSpanId,
+      )
       const verdict = await reviewPR(pr!, task.repo, round)
+      endSpan(runId, reviewerSpanId)
 
       rounds.push({
         number: round,
@@ -143,6 +166,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
     throw err
   } finally {
     _running = false
+    endSpan(runId, rootSpanId)
     finishRun(finalStatus, pr?.url)
     await closeCoderSession()
     await closeTesterSession()

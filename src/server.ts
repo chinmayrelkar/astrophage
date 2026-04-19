@@ -5,6 +5,8 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
 import { transcript } from "./transcript.js"
+import { getTraceTree, getSpans } from "./trace.js"
+import { getTokenStats, getTotalCost, getStatsByAgent } from "./token-tracker.js"
 import type { AgentEvent, PipelineStatus, RepoContext, Task } from "./types.js"
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
@@ -150,6 +152,114 @@ app.get("/runs/:id", (c) => {
   const run = runs.find((r) => r.id === c.req.param("id"))
   if (!run) return c.json({ error: "not found" }, 404)
   return c.json(run)
+})
+
+// Trace tree for a run — nested call graph
+app.get("/runs/:id/trace", (c) => {
+  const run = runs.find((r) => r.id === c.req.param("id"))
+  if (!run) return c.json({ error: "not found" }, 404)
+  const tree = getTraceTree(run.id)
+  if (!tree) return c.json({ runId: run.id, tree: null, message: "No trace data available" })
+  return c.json({ runId: run.id, tree })
+})
+
+// Per-agent cost/token breakdown for a run
+app.get("/runs/:id/costs", (c) => {
+  const run = runs.find((r) => r.id === c.req.param("id"))
+  if (!run) return c.json({ error: "not found" }, 404)
+
+  // Get all turn stats that belong to this run's agents/timeline
+  // We filter by matching the run's startedAt..finishedAt window
+  const allStats = getTokenStats()
+  const runStart = new Date(run.startedAt).getTime()
+  const runEnd = run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now()
+
+  const runStats = allStats.filter((s) => {
+    const t = new Date(s.startTime).getTime()
+    return t >= runStart && t <= runEnd
+  })
+
+  // Aggregate by agent
+  const byAgent: Record<string, {
+    agent: string
+    turns: number
+    inputTokens: number
+    outputTokens: number
+    estimatedCostUSD: number
+    totalDurationMs: number
+    avgDurationMs: number
+  }> = {}
+
+  for (const s of runStats) {
+    if (!byAgent[s.agent]) {
+      byAgent[s.agent] = {
+        agent: s.agent,
+        turns: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUSD: 0,
+        totalDurationMs: 0,
+        avgDurationMs: 0,
+      }
+    }
+    const a = byAgent[s.agent]!
+    a.turns++
+    a.inputTokens += s.inputTokens
+    a.outputTokens += s.outputTokens
+    a.estimatedCostUSD += s.estimatedCostUSD
+    a.totalDurationMs += s.durationMs
+  }
+
+  // Compute averages
+  for (const a of Object.values(byAgent)) {
+    a.avgDurationMs = a.turns > 0 ? Math.round(a.totalDurationMs / a.turns) : 0
+  }
+
+  const totalCost = runStats.reduce((sum, s) => sum + s.estimatedCostUSD, 0)
+  const totalInputTokens = runStats.reduce((sum, s) => sum + s.inputTokens, 0)
+  const totalOutputTokens = runStats.reduce((sum, s) => sum + s.outputTokens, 0)
+
+  return c.json({
+    runId: run.id,
+    totalCostUSD: totalCost,
+    totalInputTokens,
+    totalOutputTokens,
+    byAgent: Object.values(byAgent),
+    turns: runStats,
+  })
+})
+
+// Aggregate stats across all runs
+app.get("/stats", (c) => {
+  const allStats = getTokenStats()
+  const totalCost = getTotalCost()
+  const byAgent = getStatsByAgent()
+
+  const completedRuns = runs.filter((r) => r.status !== "running")
+  const totalRuns = runs.length
+  const avgCostPerRun = completedRuns.length > 0
+    ? totalCost / completedRuns.length
+    : 0
+
+  // Average duration per completed run (ms)
+  const durationsMs = completedRuns
+    .filter((r) => r.finishedAt)
+    .map((r) => new Date(r.finishedAt!).getTime() - new Date(r.startedAt).getTime())
+  const avgDurationMs = durationsMs.length > 0
+    ? durationsMs.reduce((a, b) => a + b, 0) / durationsMs.length
+    : 0
+
+  return c.json({
+    totalRuns,
+    completedRuns: completedRuns.length,
+    totalCostUSD: totalCost,
+    avgCostPerRunUSD: avgCostPerRun,
+    avgDurationMs,
+    totalInputTokens: allStats.reduce((sum, s) => sum + s.inputTokens, 0),
+    totalOutputTokens: allStats.reduce((sum, s) => sum + s.outputTokens, 0),
+    totalTurns: allStats.length,
+    byAgent,
+  })
 })
 
 app.get("/status", (c) => c.json({

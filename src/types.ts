@@ -21,12 +21,20 @@ export type AgentEventType =
   | "round_start"
   | "convergence"
 
+export interface TokenStats {
+  inputTokens: number
+  outputTokens: number
+  estimatedCostUSD: number
+  durationMs: number
+}
+
 export interface AgentEvent {
   agent: AgentName
   type: AgentEventType
   content: string
   round: number
   timestamp: string
+  tokenStats?: TokenStats
 }
 
 // ─── Repo context passed to all agents ───────────────────────────────────────

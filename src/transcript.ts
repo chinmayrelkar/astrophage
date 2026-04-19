@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentName, AgentEventType } from "./types.js"
+import type { AgentEvent, AgentName, AgentEventType, TokenStats } from "./types.js"
 
 // ─── Transcript: collects all events and emits them to subscribers ────────────
 
@@ -21,6 +21,7 @@ class Transcript {
     type: AgentEventType,
     content: string,
     round?: number,
+    tokenStats?: TokenStats,
   ): AgentEvent {
     const event: AgentEvent = {
       agent,
@@ -28,6 +29,7 @@ class Transcript {
       content,
       round: round ?? this.currentRound,
       timestamp: new Date().toISOString(),
+      ...(tokenStats ? { tokenStats } : {}),
     }
     this.events.push(event)
     for (const sub of this.subscribers) sub(event)
@@ -71,8 +73,9 @@ export function emit(
   type: AgentEventType,
   content: string,
   round?: number,
+  tokenStats?: TokenStats,
 ) {
-  return transcript.emit(agent, type, content, round)
+  return transcript.emit(agent, type, content, round, tokenStats)
 }
 
 export function roundStart(n: number) {
@@ -83,9 +86,15 @@ export function roundStart(n: number) {
   console.log("─".repeat(70))
 }
 
-export function agentTurn(agent: AgentName, label: string, content: string, round?: number) {
+export function agentTurn(
+  agent: AgentName,
+  label: string,
+  content: string,
+  round?: number,
+  tokenStats?: TokenStats,
+) {
   transcript.emit(agent, "turn_start", label, round)
   console.log(`\n[${agent.toUpperCase()}] ${label}`)
   console.log(content)
-  transcript.emit(agent, "turn_end", content, round)
+  transcript.emit(agent, "turn_end", content, round, tokenStats)
 }

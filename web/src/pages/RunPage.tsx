@@ -7,6 +7,7 @@ interface AgentEvent {
   content: string
   round: number
   timestamp: string
+  tokenStats?: { inputTokens: number; outputTokens: number; estimatedCostUSD: number; durationMs: number }
 }
 
 interface RunRecord {
@@ -21,6 +22,36 @@ interface RunRecord {
   rounds: number
   prUrl?: string
   events: AgentEvent[]
+}
+
+interface TraceNode {
+  id: string
+  parentId: string | null
+  runId: string
+  agent: string
+  round: number
+  label: string
+  startTime: string
+  endTime?: string
+  durationMs?: number
+  tokenStats?: { inputTokens: number; outputTokens: number; estimatedCostUSD: number; durationMs: number }
+  children: TraceNode[]
+}
+
+interface CostBreakdown {
+  runId: string
+  totalCostUSD: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  byAgent: Array<{
+    agent: string
+    turns: number
+    inputTokens: number
+    outputTokens: number
+    estimatedCostUSD: number
+    totalDurationMs: number
+    avgDurationMs: number
+  }>
 }
 
 const AGENT_COLORS: Record<string, string> = {
@@ -66,12 +97,85 @@ function elapsed(start: string, end?: string) {
   return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
+function fmtDuration(ms?: number): string {
+  if (ms == null) return "—"
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+}
+
+function TraceNodeRow({ node, depth }: { node: TraceNode; depth: number }) {
+  const color = AGENT_COLORS[node.agent] ?? "#94a3b8"
+  const char = AGENT_CHARS[node.agent] ?? node.agent
+  const emoji = AGENT_EMOJI[node.agent] ?? "•"
+  const indent = depth * 24
+
+  return (
+    <div>
+      <div style={{
+        display: "flex", alignItems: "flex-start", gap: "10px",
+        paddingLeft: `${indent}px`,
+        paddingTop: "6px", paddingBottom: "6px",
+        borderLeft: depth > 0 ? `1px dashed rgba(255,255,255,0.06)` : "none",
+        marginLeft: depth > 0 ? `${indent - 1}px` : "0",
+        paddingRight: "12px",
+      }}>
+        {depth > 0 && (
+          <div style={{
+            width: "12px", height: "1px",
+            background: "rgba(255,255,255,0.06)",
+            flexShrink: 0, marginTop: "9px",
+          }} />
+        )}
+        <span style={{ fontSize: "13px", flexShrink: 0 }}>{emoji}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "10px", color, fontWeight: 700 }}>{char}</span>
+            {node.round > 0 && (
+              <span style={{
+                fontSize: "8px", padding: "1px 5px",
+                background: "rgba(255,255,255,0.04)", borderRadius: "2px",
+                color: "rgba(255,255,255,0.25)",
+              }}>round {node.round}</span>
+            )}
+            <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.5)" }}>{node.label}</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: "10px", flexShrink: 0 }}>
+              <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)" }}>
+                {fmtDuration(node.durationMs)}
+              </span>
+              {node.tokenStats && (
+                <span style={{ fontSize: "9px", color: "#fbbf24" }}>
+                  ${node.tokenStats.estimatedCostUSD.toFixed(4)}
+                </span>
+              )}
+            </div>
+          </div>
+          {node.tokenStats && (
+            <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", marginTop: "2px", display: "flex", gap: "10px" }}>
+              <span>{node.tokenStats.inputTokens.toLocaleString()} in</span>
+              <span>{node.tokenStats.outputTokens.toLocaleString()} out</span>
+            </div>
+          )}
+        </div>
+      </div>
+      {node.children.map((child) => (
+        <TraceNodeRow key={child.id} node={child} depth={depth + 1} />
+      ))}
+    </div>
+  )
+}
+
+type Tab = "events" | "trace"
+
 export function RunPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [run, setRun] = useState<RunRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedRound, setSelectedRound] = useState<number | "all">("all")
+  const [activeTab, setActiveTab] = useState<Tab>("events")
+  const [traceTree, setTraceTree] = useState<TraceNode | null>(null)
+  const [costs, setCosts] = useState<CostBreakdown | null>(null)
 
   useEffect(() => {
     fetch(`/runs/${id}`)
@@ -81,6 +185,18 @@ export function RunPage() {
       })
       .then(setRun)
       .catch((e) => setError(e.message))
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    fetch(`/runs/${id}/trace`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => data?.tree ? setTraceTree(data.tree) : null)
+      .catch(() => null)
+    fetch(`/runs/${id}/costs`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => data ? setCosts(data) : null)
+      .catch(() => null)
   }, [id])
 
   if (error) return (
@@ -215,97 +331,209 @@ export function RunPage() {
           </div>
         </div>
 
-        {/* Round filter */}
-        {rounds.length > 1 && (
-          <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: "4px", marginBottom: "16px", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "0" }}>
+          {(["events", "trace"] as Tab[]).map((tab) => (
             <button
-              onClick={() => setSelectedRound("all")}
-              style={filterBtnStyle(selectedRound === "all")}
-            >ALL</button>
-            {rounds.map(r => (
-              <button
-                key={r}
-                onClick={() => setSelectedRound(r)}
-                style={filterBtnStyle(selectedRound === r)}
-              >ROUND {r}</button>
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={tabBtnStyle(activeTab === tab)}
+            >
+              {tab === "events" ? "EVENTS" : "TRACE"}
+            </button>
+          ))}
+        </div>
+
+        {/* ── EVENTS TAB ── */}
+        {activeTab === "events" && (
+          <>
+            {/* Round filter */}
+            {rounds.length > 1 && (
+              <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setSelectedRound("all")}
+                  style={filterBtnStyle(selectedRound === "all")}
+                >ALL</button>
+                {rounds.map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setSelectedRound(r)}
+                    style={filterBtnStyle(selectedRound === r)}
+                  >ROUND {r}</button>
+                ))}
+              </div>
+            )}
+
+            {/* Event groups */}
+            {Object.entries(roundGroups).map(([groupName, events]) => (
+              <div key={groupName} style={{ marginBottom: "24px" }}>
+                <div style={{
+                  fontSize: "9px", letterSpacing: "0.12em",
+                  color: "rgba(255,255,255,0.2)",
+                  marginBottom: "10px",
+                  display: "flex", alignItems: "center", gap: "10px",
+                }}>
+                  <span>{groupName}</span>
+                  <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {events.map((event) => {
+                    const color = AGENT_COLORS[event.agent] ?? "#94a3b8"
+                    const char = AGENT_CHARS[event.agent] ?? event.agent
+                    const emoji = AGENT_EMOJI[event.agent] ?? "•"
+                    const isVerdict = event.type === "verdict"
+                    const isConverge = event.type === "convergence"
+                    const isGit = event.type === "git_action"
+
+                    let content = event.content
+                    if (isVerdict) {
+                      try {
+                        const v = JSON.parse(content)
+                        content = `${v.decision.toUpperCase()}${v.nonNegotiable ? " [NON-NEGOTIABLE]" : ""}: ${v.reason}`
+                      } catch { /* use raw */ }
+                    }
+
+                    const accent = isConverge
+                      ? (content.startsWith("MERGED") || content.startsWith("ACCEPTED") ? "#00ff87" : "#f87171")
+                      : isVerdict
+                      ? (content.startsWith("ACCEPT") ? "#00ff87" : "#fbbf24")
+                      : isGit ? "#34d399"
+                      : "rgba(255,255,255,0.6)"
+
+                    return (
+                      <div key={`${event.timestamp}-${event.type}`} style={{
+                        display: "flex", gap: "12px", alignItems: "flex-start",
+                        padding: "10px 14px",
+                        background: isConverge ? "rgba(255,255,255,0.03)" : "transparent",
+                        borderLeft: `2px solid ${isConverge || isGit ? accent : "rgba(255,255,255,0.05)"}`,
+                        borderRadius: "0 4px 4px 0",
+                      }}>
+                        <span style={{ fontSize: "14px", flexShrink: 0, marginTop: "1px" }}>{emoji}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
+                            <span style={{ fontSize: "10px", color, fontWeight: 700 }}>{char}</span>
+                            <span style={{
+                              fontSize: "8px", padding: "1px 5px",
+                              background: "rgba(255,255,255,0.05)", borderRadius: "2px",
+                              color: "rgba(255,255,255,0.25)", letterSpacing: "0.05em",
+                            }}>
+                              {event.type.replace("_", " ").toUpperCase()}
+                            </span>
+                            <span style={{ marginLeft: "auto", fontSize: "8px", color: "rgba(255,255,255,0.15)" }}>
+                              {new Date(event.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <div style={{
+                            fontSize: "11px", color: accent,
+                            lineHeight: 1.6, wordBreak: "break-word",
+                            whiteSpace: "pre-wrap",
+                          }}>
+                            {content}
+                          </div>
+                          {event.tokenStats && (
+                            <div style={{
+                              marginTop: "4px", fontSize: "9px",
+                              color: "rgba(255,255,255,0.2)",
+                              display: "flex", gap: "10px",
+                            }}>
+                              <span>{event.tokenStats.inputTokens.toLocaleString()} in</span>
+                              <span>{event.tokenStats.outputTokens.toLocaleString()} out</span>
+                              <span>${event.tokenStats.estimatedCostUSD.toFixed(4)}</span>
+                              <span>{Math.round(event.tokenStats.durationMs / 1000)}s</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             ))}
-          </div>
+          </>
         )}
 
-        {/* Event groups */}
-        {Object.entries(roundGroups).map(([groupName, events]) => (
-          <div key={groupName} style={{ marginBottom: "24px" }}>
+        {/* ── TRACE TAB ── */}
+        {activeTab === "trace" && (
+          <div>
+            {/* Cost summary row */}
+            {costs && (
+              <div style={{
+                display: "flex", gap: "24px", flexWrap: "wrap",
+                padding: "12px 16px", marginBottom: "20px",
+                background: "rgba(255,255,255,0.02)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "6px",
+              }}>
+                <div>
+                  <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginBottom: "4px", letterSpacing: "0.08em" }}>TOTAL COST</div>
+                  <div style={{ fontSize: "16px", fontWeight: 700, color: "#fbbf24" }}>${costs.totalCostUSD.toFixed(4)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginBottom: "4px", letterSpacing: "0.08em" }}>INPUT TOKENS</div>
+                  <div style={{ fontSize: "16px", fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>{costs.totalInputTokens.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", marginBottom: "4px", letterSpacing: "0.08em" }}>OUTPUT TOKENS</div>
+                  <div style={{ fontSize: "16px", fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>{costs.totalOutputTokens.toLocaleString()}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Per-agent cost breakdown */}
+            {costs && costs.byAgent.length > 0 && (
+              <div style={{ marginBottom: "24px" }}>
+                <div style={{
+                  fontSize: "9px", letterSpacing: "0.12em",
+                  color: "rgba(255,255,255,0.2)", marginBottom: "10px",
+                  display: "flex", alignItems: "center", gap: "10px",
+                }}>
+                  <span>COST BY AGENT</span>
+                  <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {costs.byAgent.map((a) => {
+                    const color = AGENT_COLORS[a.agent] ?? "#94a3b8"
+                    const char = AGENT_CHARS[a.agent] ?? a.agent
+                    return (
+                      <div key={a.agent} style={{
+                        display: "flex", alignItems: "center", gap: "12px",
+                        padding: "8px 12px",
+                        background: "rgba(255,255,255,0.02)",
+                        borderLeft: `2px solid ${color}30`,
+                        borderRadius: "0 4px 4px 0",
+                      }}>
+                        <span style={{ fontSize: "10px", color, fontWeight: 700, width: "90px", flexShrink: 0 }}>{char}</span>
+                        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", width: "50px" }}>{a.turns} turn{a.turns !== 1 ? "s" : ""}</span>
+                        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.4)" }}>{a.inputTokens.toLocaleString()} in / {a.outputTokens.toLocaleString()} out</span>
+                        <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 700, color: "#fbbf24" }}>${a.estimatedCostUSD.toFixed(4)}</span>
+                        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)" }}>{Math.round(a.totalDurationMs / 1000)}s total</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Trace tree */}
             <div style={{
               fontSize: "9px", letterSpacing: "0.12em",
-              color: "rgba(255,255,255,0.2)",
-              marginBottom: "10px",
+              color: "rgba(255,255,255,0.2)", marginBottom: "10px",
               display: "flex", alignItems: "center", gap: "10px",
             }}>
-              <span>{groupName}</span>
+              <span>CALL GRAPH</span>
               <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {events.map((event) => {
-                const color = AGENT_COLORS[event.agent] ?? "#94a3b8"
-                const char = AGENT_CHARS[event.agent] ?? event.agent
-                const emoji = AGENT_EMOJI[event.agent] ?? "•"
-                const isVerdict = event.type === "verdict"
-                const isConverge = event.type === "convergence"
-                const isGit = event.type === "git_action"
-
-                let content = event.content
-                if (isVerdict) {
-                  try {
-                    const v = JSON.parse(content)
-                    content = `${v.decision.toUpperCase()}${v.nonNegotiable ? " [NON-NEGOTIABLE]" : ""}: ${v.reason}`
-                  } catch { /* use raw */ }
-                }
-
-                const accent = isConverge
-                  ? (content.startsWith("MERGED") || content.startsWith("ACCEPTED") ? "#00ff87" : "#f87171")
-                  : isVerdict
-                  ? (content.startsWith("ACCEPT") ? "#00ff87" : "#fbbf24")
-                  : isGit ? "#34d399"
-                  : "rgba(255,255,255,0.6)"
-
-                return (
-                  <div key={`${event.timestamp}-${event.type}`} style={{
-                    display: "flex", gap: "12px", alignItems: "flex-start",
-                    padding: "10px 14px",
-                    background: isConverge ? "rgba(255,255,255,0.03)" : "transparent",
-                    borderLeft: `2px solid ${isConverge || isGit ? accent : "rgba(255,255,255,0.05)"}`,
-                    borderRadius: "0 4px 4px 0",
-                  }}>
-                    <span style={{ fontSize: "14px", flexShrink: 0, marginTop: "1px" }}>{emoji}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
-                        <span style={{ fontSize: "10px", color, fontWeight: 700 }}>{char}</span>
-                        <span style={{
-                          fontSize: "8px", padding: "1px 5px",
-                          background: "rgba(255,255,255,0.05)", borderRadius: "2px",
-                          color: "rgba(255,255,255,0.25)", letterSpacing: "0.05em",
-                        }}>
-                          {event.type.replace("_", " ").toUpperCase()}
-                        </span>
-                        <span style={{ marginLeft: "auto", fontSize: "8px", color: "rgba(255,255,255,0.15)" }}>
-                          {new Date(event.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <div style={{
-                        fontSize: "11px", color: accent,
-                        lineHeight: 1.6, wordBreak: "break-word",
-                        whiteSpace: "pre-wrap",
-                      }}>
-                        {content}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+            {traceTree ? (
+              <TraceNodeRow node={traceTree} depth={0} />
+            ) : (
+              <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.2)", padding: "16px 0" }}>
+                No trace data available for this run.
+              </div>
+            )}
           </div>
-        ))}
+        )}
       </div>
     </div>
   )
@@ -339,4 +567,18 @@ const filterBtnStyle = (active: boolean): React.CSSProperties => ({
   fontSize: "9px",
   letterSpacing: "0.08em",
   padding: "3px 10px",
+})
+
+const tabBtnStyle = (active: boolean): React.CSSProperties => ({
+  background: "none",
+  border: "none",
+  borderBottom: `2px solid ${active ? "rgba(255,220,80,0.7)" : "transparent"}`,
+  color: active ? "rgba(255,220,80,0.9)" : "rgba(255,255,255,0.3)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: "10px",
+  fontWeight: active ? 700 : 400,
+  letterSpacing: "0.1em",
+  padding: "6px 14px 8px",
+  marginBottom: "-1px",
 })
