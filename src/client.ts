@@ -11,7 +11,8 @@ let _serverClose: (() => void) | null = null
 export async function getClient(): Promise<OpencodeClient> {
   if (_client) return _client
 
-  const dir = process.cwd()
+  // Point the server at the bawarchi repo so agents can read/edit its files directly
+  const dir = "/home/ubuntu/bawarchi"
   console.log(`[ASTROPHAGE] Starting dedicated OpenCode server (dir: ${dir})...`)
 
   const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 4097 })

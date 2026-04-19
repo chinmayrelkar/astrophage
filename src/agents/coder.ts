@@ -1,13 +1,9 @@
-import { readFileSync } from "fs"
-import { join } from "path"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
 import type { BugSeed, Patch, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
 // ─── Coder Agent ──────────────────────────────────────────────────────────────
-
-const BAWARCHI_ROOT = "/home/ubuntu/bawarchi"
 
 async function getOc(): Promise<OpencodeClient> {
   return getClient()
@@ -27,8 +23,7 @@ async function ensureSession(): Promise<string> {
       parts: [{
         type: "text",
         text: `You are the Coder agent in the Astrophage agent company.
-You fix bugs in the bawarchi Go codebase. The full file content will be provided
-in each request — do not try to read files yourself.
+You fix bugs in the bawarchi Go codebase. The codebase is in your working directory.
 
 Rules:
 - Always explain WHY the change fixes the bug.
@@ -38,7 +33,7 @@ Rules:
 
 Respond in EXACTLY this format, no other text:
 EXPLANATION: <why this fixes the bug>
-FILE: <relative path from bawarchi root>
+FILE: <relative path from repo root>
 ORIGINAL:
 \`\`\`go
 <original buggy snippet>
@@ -51,14 +46,6 @@ PROPOSED:
     })
   }
   return _sessionID
-}
-
-function readBawarchiFile(relPath: string): string {
-  try {
-    return readFileSync(join(BAWARCHI_ROOT, relPath), "utf8")
-  } catch {
-    return ""
-  }
 }
 
 function parseCoderResponse(raw: string, bug: BugSeed): Patch {
@@ -83,25 +70,17 @@ export async function proposeInitialFix(bug: BugSeed, round: number): Promise<Pa
   console.log(`\n[CODER] Analyzing bug in ${bug.file}:${bug.startLine}-${bug.endLine}`)
   console.log(`        ${bug.description}`)
 
-  // Read the actual file and include it so the model doesn't need filesystem access
-  const fileContent = readBawarchiFile(bug.file)
-
   const prompt = `Fix the following bug in the bawarchi codebase.
 
 Bug location: ${bug.file} lines ${bug.startLine}-${bug.endLine}
 Bug description: ${bug.description}
 
-Buggy code snippet:
+Buggy code:
 \`\`\`go
 ${bug.buggyCode}
 \`\`\`
 
-Full file content for context:
-\`\`\`go
-${fileContent}
-\`\`\`
-
-Propose a minimal fix. Follow the output format exactly.`
+Read the file, propose a minimal fix. Follow the output format exactly.`
 
   const result = await promptAndWait(oc, {
     sessionID,
