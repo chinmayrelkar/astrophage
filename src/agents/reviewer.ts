@@ -154,7 +154,12 @@ function parseVerdict(result: { text: string; structured: unknown }, round: numb
 export async function closeReviewerSession() {
   const oc = await getOc()
   if (_sessionID) {
-    await oc.session.delete({ sessionID: _sessionID })
+    await oc.session.delete({ sessionID: _sessionID }).catch(() => {})
     _sessionID = null
   }
+}
+
+/** Reset before a new pipeline run — ensures a fresh session with clean context */
+export async function resetReviewerSession() {
+  await closeReviewerSession()
 }
