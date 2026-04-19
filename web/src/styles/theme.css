@@ -1,29 +1,6 @@
-/* ─── Astrophage Dark Ops Theme ─────────────────────────────────────────────── */
+/* ─── Astrophage — Project Hail Mary Space UI ───────────────────────────────── */
 
 :root {
-  --bg-base:        #0a0a0f;
-  --bg-panel:       #0f0f1a;
-  --bg-panel-hover: #14142a;
-  --bg-border:      #1e1e3a;
-
-  --text-primary:   #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-dim:       #475569;
-
-  --accent-green:   #00ff87;
-  --accent-amber:   #fbbf24;
-  --accent-red:     #f87171;
-  --accent-blue:    #60a5fa;
-  --accent-purple:  #a78bfa;
-
-  --agent-pm:       #a78bfa;
-  --agent-arch:     #60a5fa;
-  --agent-coder:    #00ff87;
-  --agent-reviewer: #fbbf24;
-  --agent-tester:   #f472b6;
-  --agent-git:      #34d399;
-  --agent-orch:     #94a3b8;
-
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
 }
 
@@ -36,56 +13,22 @@
 html, body, #root {
   height: 100%;
   width: 100%;
-  background: var(--bg-base);
-  color: var(--text-primary);
+  background: #050510;
+  color: #e2e8f0;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 4px; }
+/* Scrollbar */
+::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-border); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-/* Status indicators */
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.status-dot.thinking {
-  background: var(--accent-green);
-  box-shadow: 0 0 8px var(--accent-green);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.status-dot.idle { background: var(--text-dim); }
-.status-dot.done { background: var(--accent-green); }
-.status-dot.blocked { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
-
+/* Pulse keyframe used by connection dot */
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px #00ff87; }
+  50% { opacity: 0.4; box-shadow: 0 0 2px #00ff87; }
 }
-
-/* Token stream text */
-.token-stream {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-y: auto;
-  max-height: 100%;
-}
-
-.token-stream .highlight { color: var(--text-primary); }
-.token-stream .code { color: var(--accent-green); }
-.token-stream .verdict-accept { color: var(--accent-green); font-weight: 700; }
-.token-stream .verdict-reject { color: var(--accent-red); font-weight: 700; }
