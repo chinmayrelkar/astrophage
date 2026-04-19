@@ -1,6 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
-import type { Patch, ReviewVerdict } from "../types.js"
+import type { Patch, RepoContext, ReviewVerdict } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 import { constitutionPrompt } from "../constitution.js"
 
@@ -12,7 +12,7 @@ async function getOc(): Promise<OpencodeClient> {
 
 let _sessionID: string | null = null
 
-async function ensureSession(): Promise<string> {
+async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
     const res = await oc.session.create({ title: "Astrophage Reviewer" })
@@ -21,37 +21,45 @@ async function ensureSession(): Promise<string> {
     await promptAndWait(oc, {
       sessionID: _sessionID,
       noReply: true,
-      parts: [
-        {
-          type: "text",
-          text: `You are the Reviewer agent in the Astrophage agent company.
-Your job is to review code patches proposed by the Coder agent.
+      parts: [{
+        type: "text",
+        text: `You are the Reviewer agent in the Astrophage agent company.
+
+## Your task
+Review code patches proposed by the Coder agent for this repository:
+- Local path: ${repo.localPath}
+- Remote: ${repo.remoteUrl}
+- Default branch: ${repo.defaultBranch}
+${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} ${pr.url} "${pr.title}"`).join(", ")}` : ""}
+
+The codebase is available in your working directory. You may read files to verify the patch.
 
 ${constitutionPrompt()}
 
-When reviewing, respond with a JSON object in EXACTLY this format — no other text:
+## Output format
+Respond with a JSON object in EXACTLY this format — no other text:
 {
   "decision": "accept" | "reject",
   "reason": "<clear explanation>",
   "violatedRule": "<exact rule text if reject, else omit>",
   "nonNegotiable": true | false
 }`,
-        },
-      ],
+      }],
     })
   }
   return _sessionID
 }
 
-export async function reviewPatch(patch: Patch, round: number): Promise<ReviewVerdict> {
+export async function reviewPatch(patch: Patch, repo: RepoContext, round: number): Promise<ReviewVerdict> {
   const oc = await getOc()
-  const sessionID = await ensureSession()
+  const sessionID = await ensureSession(repo)
 
   emit("reviewer", "turn_start", `Reviewing patch (round ${round})`, round)
   console.log(`\n[REVIEWER] Reviewing proposed fix for ${patch.file}`)
 
   const prompt = `Review this proposed code patch.
 
+Repo: ${repo.remoteUrl}
 File: ${patch.file}
 Coder's explanation: ${patch.explanation}
 

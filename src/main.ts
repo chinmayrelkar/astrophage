@@ -37,6 +37,11 @@ const task: Task = {
     "The bawarchi-generated gRPC CLI skips authentication silently when the " +
     "auth env var is unset. The fix must make this a hard error with a clear " +
     "message naming the missing env var.",
+  repo: {
+    localPath: "/home/ubuntu/bawarchi",
+    remoteUrl: "https://github.com/chinmayrelkar/bawarchi.git",
+    defaultBranch: "main",
+  },
   bugSeed: oauthBug,
 }
 
@@ -49,10 +54,10 @@ async function runIteration0(): Promise<PipelineResult> {
   if (!task.bugSeed) throw new Error("No bug seed for Iteration 0")
 
   // Step 1: Coder proposes fix
-  const patch = await proposeInitialFix(task.bugSeed, round)
+  const patch = await proposeInitialFix(task.bugSeed, task.repo, round)
 
   // Step 2: Reviewer evaluates
-  const verdict = await reviewPatch(patch, round)
+  const verdict = await reviewPatch(patch, task.repo, round)
 
   // Step 3: Print verdict
   console.log("\n" + "═".repeat(70))

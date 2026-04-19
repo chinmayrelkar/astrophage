@@ -29,12 +29,34 @@ export interface AgentEvent {
   timestamp: string
 }
 
+// ─── Repo context passed to all agents ───────────────────────────────────────
+
+export interface RepoContext {
+  /** Absolute path to the repo on disk */
+  localPath: string
+  /** Remote URL (GitHub) */
+  remoteUrl: string
+  /** Default branch */
+  defaultBranch: string
+  /** Open PRs relevant to this task (populated by Git agent in later iterations) */
+  openPRs?: PRRef[]
+}
+
+export interface PRRef {
+  number: number
+  url: string
+  title: string
+  branch: string
+}
+
 // ─── Task handed to the orchestrator ─────────────────────────────────────────
 
 export interface Task {
   id: string
   title: string
   description: string
+  /** The repo this task operates on */
+  repo: RepoContext
   /** Pre-identified bug location (Iteration 0: hardcoded seed) */
   bugSeed?: BugSeed
 }

@@ -1,6 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
-import type { BugSeed, Patch, ReviewVerdict, TestResult } from "../types.js"
+import type { BugSeed, Patch, RepoContext, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
 // ─── Coder Agent ──────────────────────────────────────────────────────────────
@@ -11,7 +11,7 @@ async function getOc(): Promise<OpencodeClient> {
 
 let _sessionID: string | null = null
 
-async function ensureSession(): Promise<string> {
+async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
     const res = await oc.session.create({ title: "Astrophage Coder" })
@@ -23,14 +23,23 @@ async function ensureSession(): Promise<string> {
       parts: [{
         type: "text",
         text: `You are the Coder agent in the Astrophage agent company.
-You fix bugs in the bawarchi Go codebase. The codebase is in your working directory.
 
-Rules:
+## Your task
+Fix bugs in the following Go repository:
+- Local path: ${repo.localPath}
+- Remote: ${repo.remoteUrl}
+- Default branch: ${repo.defaultBranch}
+${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} ${pr.url} "${pr.title}"`).join(", ")}` : ""}
+
+The codebase is available in your working directory. Use your tools to read files.
+
+## Rules
 - Always explain WHY the change fixes the bug.
 - Never introduce hardcoded secrets, tokens, or credentials.
 - If an auth env var is missing, the program must exit with a clear error — never silently proceed.
 - Keep diffs minimal — change only what is necessary.
 
+## Output format
 Respond in EXACTLY this format, no other text:
 EXPLANATION: <why this fixes the bug>
 FILE: <relative path from repo root>
@@ -62,16 +71,17 @@ function parseCoderResponse(raw: string, bug: BugSeed): Patch {
   }
 }
 
-export async function proposeInitialFix(bug: BugSeed, round: number): Promise<Patch> {
+export async function proposeInitialFix(bug: BugSeed, repo: RepoContext, round: number): Promise<Patch> {
   const oc = await getOc()
-  const sessionID = await ensureSession()
+  const sessionID = await ensureSession(repo)
 
   emit("coder", "turn_start", "Proposing initial fix for seeded bug", round)
   console.log(`\n[CODER] Analyzing bug in ${bug.file}:${bug.startLine}-${bug.endLine}`)
   console.log(`        ${bug.description}`)
 
-  const prompt = `Fix the following bug in the bawarchi codebase.
+  const prompt = `Fix the following bug.
 
+Repo: ${repo.remoteUrl}
 Bug location: ${bug.file} lines ${bug.startLine}-${bug.endLine}
 Bug description: ${bug.description}
 
@@ -80,7 +90,8 @@ Buggy code:
 ${bug.buggyCode}
 \`\`\`
 
-Read the file, propose a minimal fix. Follow the output format exactly.`
+Read the file at ${bug.file} to understand the full context, then propose a minimal fix.
+Follow the output format exactly.`
 
   const result = await promptAndWait(oc, {
     sessionID,
@@ -94,12 +105,13 @@ Read the file, propose a minimal fix. Follow the output format exactly.`
 
 export async function iterateFix(
   previousPatch: Patch,
+  repo: RepoContext,
   verdict: ReviewVerdict | null,
   testResult: TestResult | null,
   round: number,
 ): Promise<Patch> {
   const oc = await getOc()
-  const sessionID = await ensureSession()
+  const sessionID = await ensureSession(repo)
 
   emit("coder", "turn_start", `Iterating fix based on feedback (round ${round})`, round)
   console.log(`\n[CODER] Iterating fix — round ${round}`)
