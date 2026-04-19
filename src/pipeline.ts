@@ -23,6 +23,7 @@ import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer, setWorkingDirectory } from "./client.js"
 import { startSpan, endSpan } from "./trace.js"
+import { saveRunSummary } from "./run-memory.js"
 import { clearTokenStats, getTokenStats } from "./token-tracker.js"
 import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
 
@@ -242,6 +243,27 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
     _running = false
     endSpan(runId, rootSpanId)
     finishRun(finalStatus, pr?.url)
+
+    // Persist run summary for cross-task memory
+    const lastRound = rounds[rounds.length - 1]
+    const lessons: string[] = []
+    if (finalStatus === "merged") lessons.push("Fix accepted and merged successfully.")
+    for (const r of rounds) {
+      if (r.verdict.nonNegotiable) lessons.push(`Non-negotiable violation: ${r.verdict.reason}`)
+      if (!r.testResult.passed) lessons.push(`Tests failed round ${r.number}: ${r.testResult.failures[0] ?? "unknown"}`)
+      if (r.verdict.decision === "reject" && !r.verdict.nonNegotiable) lessons.push(`Round ${r.number} rejected: ${r.verdict.reason}`)
+    }
+    saveRunSummary({
+      taskId: task.id,
+      taskTitle: task.title,
+      repoUrl: task.repo.remoteUrl,
+      status: finalStatus,
+      rounds: rounds.length,
+      finalVerdict: lastRound?.verdict.reason,
+      lessons,
+      completedAt: new Date().toISOString(),
+    })
+
     await closePMSession()
     await closeArchitectSession()
     await closeCoderSession()

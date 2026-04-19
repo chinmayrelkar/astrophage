@@ -1,6 +1,6 @@
 {
-  "runAt": "2026-04-19T10:49:45.992Z",
-  "ref": "master@2d28223",
+  "runAt": "2026-04-19T10:51:07.419Z",
+  "ref": "master@c5daaee",
   "total": 12,
   "passed": 12,
   "failed": 0,
@@ -52,7 +52,7 @@
       "description": "parseTestResult correctly identifies a PASS when the agent outputs 'ok' and ends with PASS",
       "passed": true,
       "detail": "passed: got true, want true → OK | failures.length: got 0, want 0 → OK",
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "tester-fail-explicit",

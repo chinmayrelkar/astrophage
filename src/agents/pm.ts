@@ -2,6 +2,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait, registerSession, unregisterSession } from "../client.js"
 import type { Task, RepoContext, PMPlan } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
+import { formatRunMemoryForPM } from "../run-memory.js"
 
 // ─── PM Agent (Stratt) ────────────────────────────────────────────────────────
 // Stratt is the Project Manager aboard the Hail Mary. She receives the raw task,
@@ -71,6 +72,9 @@ export async function planTask(task: Task): Promise<PMPlan> {
   console.log(`\n[PM — Stratt] Planning task: ${task.title}`)
 
   // ── Step 1: Explore (free-form, tool use allowed) ──────────────────────────
+  // Inject cross-run memory so PM can learn from past outcomes on this repo
+  const memoryBlock = formatRunMemoryForPM(task.repo.remoteUrl)
+
   // Give the model room to use tools and think before being asked for JSON.
   const explorePrompt = `You have a new task to plan. First, explore the repo to understand what needs to change.
 
@@ -83,7 +87,7 @@ ${task.description}
 ## Repo
 - Local path: ${task.repo.localPath}
 - Remote: ${task.repo.remoteUrl}
-
+${memoryBlock}
 Explore the repo now. Read the relevant files, identify which files need to change,
 assess the complexity, and identify the security/correctness risks.
 Think out loud — no output format required yet. Just explore and think.`
