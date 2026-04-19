@@ -64,18 +64,33 @@ You have full access: read, edit files, run bash, git, gh CLI.
 
 // ─── Run tests for a PR ───────────────────────────────────────────────────────
 
-export async function runTests(pr: PRInfo, repo: RepoContext, round: number): Promise<TestResult> {
+export interface TesterContext {
+  /** Acceptance criteria from the PM plan — specific behaviours to test */
+  acceptanceCriteria?: string[]
+  /** Test hints from the Architect — specific functions/scenarios to cover */
+  testHints?: string[]
+}
+
+export async function runTests(pr: PRInfo, repo: RepoContext, round: number, ctx: TesterContext = {}): Promise<TestResult> {
   const oc = await getOc()
   const sessionID = await ensureSession(repo)
 
   emit("tester", "turn_start", `Writing and running tests for PR #${pr.number} (round ${round})`, round)
   console.log(`\n[TESTER] Running tests for PR #${pr.number} — round ${round}`)
 
+  // Build optional PM guidance block for the tester
+  const criteriaBlock = ctx.acceptanceCriteria && ctx.acceptanceCriteria.length > 0
+    ? `\n## Acceptance Criteria (from PM)\nYour tests must verify:\n${ctx.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}\n`
+    : ""
+  const hintsBlock = ctx.testHints && ctx.testHints.length > 0
+    ? `\n## Test Hints (from Architect)\n${ctx.testHints.map((h) => `- ${h}`).join("\n")}\n`
+    : ""
+
   const prompt = `Look at PR #${pr.number} and write a Go test for the fixed behaviour.
 
 PR: ${pr.url}
 PR number: ${pr.number}
-
+${criteriaBlock}${hintsBlock}
 Steps:
 1. Read the PR diff: gh pr diff ${pr.number}
 2. Understand what code changed and what behaviour was fixed or added

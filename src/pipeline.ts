@@ -1,13 +1,20 @@
 /**
- * Pipeline runner — PR-driven flow:
+ * Pipeline runner — PM-driven PR flow:
  *
- * 1. Coder explores repo, fixes bug, opens PR
- * 2. Reviewer reads PR diff on GitHub, posts review comment, returns verdict
- * 3. If rejected → coder reads PR comments, updates code, force-pushes → loop
- * 4. If accepted → reviewer approves + merges PR
- * 5. Exit when accepted or max rounds hit
+ * 0. PM (Stratt) analyses the task and produces a dynamic plan
+ *    (maxRounds, focusAreas, riskFlags, acceptanceCriteria)
+ * 1. Architect (Ilyukhina) derives file contracts and test hints from the plan
+ * 2. Coder explores repo, fixes bug, opens PR — guided by PM focusAreas
+ * 3. Tester writes & runs tests — guided by PM acceptanceCriteria + Architect testHints
+ * 4. Reviewer reads PR diff on GitHub, posts review, returns verdict
+ *    — guided by PM riskFlags
+ * 5. If rejected → coder reads PR comments, updates code, force-pushes → loop
+ * 6. If accepted → reviewer approves + merges PR
+ * 7. Exit when accepted or plan.maxRounds hit (not a hardcoded constant)
  */
 
+import { planTask, closePMSession, resetPMSession } from "./agents/pm.js"
+import { deriveContracts, closeArchitectSession, resetArchitectSession } from "./agents/architect.js"
 import { proposeAndOpenPR, iterateOnPRFeedback, closeCoderSession, resetCoderSession } from "./agents/coder.js"
 import type { PRInfo } from "./agents/coder.js"
 import { reviewPR, approveAndMergePR, closeReviewerSession, resetReviewerSession } from "./agents/reviewer.js"
@@ -15,9 +22,10 @@ import { runTests, closeTesterSession, resetTesterSession } from "./agents/teste
 import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
-import type { Task, PipelineResult } from "./types.js"
+import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
 
-const MAX_ROUNDS = 5
+// Fallback cap — PM plan.maxRounds always takes precedence when available
+const DEFAULT_MAX_ROUNDS = 3
 
 let _running = false
 
@@ -30,6 +38,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   _running = true
 
   // Fresh sessions for every run
+  await resetPMSession()
+  await resetArchitectSession()
   await resetCoderSession()
   await resetReviewerSession()
   await resetTesterSession()
@@ -46,22 +56,65 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   let finalStatus: "merged" | "unresolved" = "unresolved"
   const rounds: PipelineResult["rounds"] = []
 
+  // ── Phase 0: PM planning ────────────────────────────────────────────────────
+  let plan: PMPlan | null = null
+  let spec: Spec | null = null
+  let maxRounds = DEFAULT_MAX_ROUNDS
+
   try {
-    for (let round = 1; round <= MAX_ROUNDS; round++) {
+    emit("pm", "turn_start", `Planning task: ${task.title}`, 0)
+    plan = await planTask(task)
+    maxRounds = plan.maxRounds
+    emit("pm", "convergence", `Plan ready — maxRounds=${maxRounds}`, 0)
+    console.log(`\n[PIPELINE] PM plan: maxRounds=${maxRounds}`)
+  } catch (err) {
+    console.warn(`[PIPELINE] PM agent failed — falling back to default plan: ${err}`)
+    emit("orchestrator", "convergence", `PM agent failed, using default plan: ${err}`, 0)
+    // Continue without a plan — pipeline uses defaults
+  }
+
+  // ── Phase 1: Architect contracts ────────────────────────────────────────────
+  if (plan) {
+    try {
+      emit("architect", "turn_start", `Deriving contracts for: ${task.title}`, 0)
+      spec = await deriveContracts(task, plan)
+      emit("architect", "convergence", `Contracts ready — ${spec.fileContracts.length} file(s)`, 0)
+    } catch (err) {
+      console.warn(`[PIPELINE] Architect agent failed — proceeding without contracts: ${err}`)
+      emit("orchestrator", "convergence", `Architect agent failed: ${err}`, 0)
+    }
+  }
+
+  // Assemble context objects to inject into per-agent prompts
+  const coderCtx = {
+    focusAreas: plan?.focusAreas,
+    acceptanceCriteria: spec?.acceptanceCriteria ?? plan?.subtasks.map((s) => s.acceptanceCriteria),
+  }
+  const reviewerCtx = {
+    riskFlags: plan?.riskFlags,
+  }
+  const testerCtx = {
+    acceptanceCriteria: spec?.acceptanceCriteria ?? plan?.subtasks.map((s) => s.acceptanceCriteria),
+    testHints: spec?.testHints,
+  }
+
+  try {
+    for (let round = 1; round <= maxRounds; round++) {
       roundStart(round)
 
-      // ── Coder ────────────────────────────────────────────────────────────
+      // ── Coder ──────────────────────────────────────────────────────────────
       if (round === 1) {
-        // First round: explore, fix, open PR
-        pr = await proposeAndOpenPR(task, round)
+        // First round: explore, fix, open PR — with PM focus areas injected
+        pr = await proposeAndOpenPR(task, round, coderCtx)
         console.log(`\n[PIPELINE] PR opened: ${pr.url}`)
       } else {
         // Subsequent rounds: read review comments, update, force-push
         await iterateOnPRFeedback(task, pr!, round)
       }
 
-      // ── Tester ───────────────────────────────────────────────────────────
-      const testResult = await runTests(pr!, task.repo, round)
+      // ── Tester ────────────────────────────────────────────────────────────
+      // Pass acceptance criteria + architect test hints to the tester
+      const testResult = await runTests(pr!, task.repo, round, testerCtx)
 
       if (!testResult.passed) {
         const failSummary = testResult.failures.slice(0, 3).join("; ") || "see output"
@@ -78,15 +131,16 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
           verdict: { decision: "reject", reason: `Tests failed: ${failSummary}`, nonNegotiable: false, round },
         })
 
-        if (round === MAX_ROUNDS) {
-          emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${MAX_ROUNDS}) reached`, round)
+        if (round === maxRounds) {
+          emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${maxRounds}) reached`, round)
           console.log(`\n  [UNRESOLVED] Max rounds reached`)
         }
         continue
       }
 
-      // ── Reviewer ─────────────────────────────────────────────────────────
-      const verdict = await reviewPR(pr!, task.repo, round)
+      // ── Reviewer ──────────────────────────────────────────────────────────
+      // Pass PM risk flags to the reviewer for extra scrutiny
+      const verdict = await reviewPR(pr!, task.repo, round, reviewerCtx)
 
       rounds.push({
         number: round,
@@ -110,7 +164,6 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       if (verdict.nonNegotiable) {
         emit("orchestrator", "convergence", `BLOCKED [NON-NEGOTIABLE]: ${verdict.reason}`, round)
         console.log(`  [BLOCKED] Non-negotiable rule violated: ${verdict.reason}`)
-        // Close the PR
         console.log(`  Closing PR ${pr!.url}`)
         finalStatus = "unresolved"
         break
@@ -121,8 +174,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       emit("orchestrator", "convergence", `REJECTED (round ${round}): ${verdict.reason}`, round)
       console.log("═".repeat(70))
 
-      if (round === MAX_ROUNDS) {
-        emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${MAX_ROUNDS}) reached`, round)
+      if (round === maxRounds) {
+        emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${maxRounds}) reached`, round)
         console.log(`\n  [UNRESOLVED] Max rounds reached`)
       }
     }
@@ -144,6 +197,8 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   } finally {
     _running = false
     finishRun(finalStatus, pr?.url)
+    await closePMSession()
+    await closeArchitectSession()
     await closeCoderSession()
     await closeTesterSession()
     await closeReviewerSession()

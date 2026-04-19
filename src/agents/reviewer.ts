@@ -67,7 +67,12 @@ If rejecting, be specific — explain exactly what must change.`,
 
 // ─── Review a PR — posts GitHub review, returns verdict ───────────────────────
 
-export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number): Promise<ReviewVerdict> {
+export interface ReviewerContext {
+  /** Risk flags from the PM plan — extra things for the reviewer to scrutinize */
+  riskFlags?: string[]
+}
+
+export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number, ctx: ReviewerContext = {}): Promise<ReviewVerdict> {
   const oc = await getOc()
   const sessionID = await ensureSession(repo)
 
@@ -75,12 +80,17 @@ export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number): Pr
   emit("reviewer", "git_action", `Reading PR diff #${pr.number}...`, round)
   console.log(`\n[REVIEWER] Reviewing PR #${pr.number}: ${pr.url}`)
 
+  // Build optional PM risk flags block
+  const riskBlock = ctx.riskFlags && ctx.riskFlags.length > 0
+    ? `\n## PM Risk Flags\nThe project manager has flagged these areas for extra scrutiny:\n${ctx.riskFlags.map((r) => `- ${r}`).join("\n")}\n`
+    : ""
+
   const prompt = `Review this PR and post your GitHub review.
 
 PR URL: ${pr.url}
 PR number: ${pr.number}
 Repo: ${repo.remoteUrl}
-
+${riskBlock}
 Run these steps IN ORDER:
 
 STEP 1 — Read the diff:
