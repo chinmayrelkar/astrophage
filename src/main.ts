@@ -11,6 +11,7 @@ import { startServer } from "./server.js"
 import { proposeInitialFix, closeCoderSession } from "./agents/coder.js"
 import { reviewPatch, closeReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
+import { closeServer } from "./client.js"
 import type { Task, BugSeed, PipelineResult } from "./types.js"
 
 // ─── Seeded task (Iteration 0: hardcoded) ────────────────────────────────────
@@ -111,6 +112,7 @@ async function main() {
   } finally {
     await closeCoderSession()
     await closeReviewerSession()
+    closeServer()
   }
 }
 

@@ -1,4 +1,5 @@
-import { createOpencode } from "@opencode-ai/sdk/v2"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import { getClient } from "../client.js"
 import type { Patch, ReviewVerdict } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 import { constitutionPrompt } from "../constitution.js"
@@ -8,17 +9,8 @@ import { constitutionPrompt } from "../constitution.js"
 // Reviews a proposed patch against the constitution.
 // Returns a structured ReviewVerdict via json_schema format.
 
-type OC = Awaited<ReturnType<typeof createOpencode>>
-
-let _oc: OC | null = null
-
-async function getOc(): Promise<OC> {
-  if (!_oc) {
-    _oc = await createOpencode({
-      config: { model: "anthropic/claude-sonnet-4-5" },
-    })
-  }
-  return _oc
+async function getOc(): Promise<OpencodeClient> {
+  return getClient()
 }
 
 let _sessionID: string | null = null
@@ -26,13 +18,13 @@ let _sessionID: string | null = null
 async function ensureSession(): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    const res = await oc.client.session.create({
+    const res = await oc.session.create({
       title: "Astrophage Reviewer",
     })
     _sessionID = res.data!.id
 
     // Inject constitution once as system context
-    await oc.client.session.prompt({
+    await oc.session.prompt({
       sessionID: _sessionID,
       noReply: true,
       parts: [
@@ -82,7 +74,7 @@ ${patch.proposedCode}
 
 Apply the constitution and return your verdict as JSON.`
 
-  const result = await oc.client.session.prompt({
+  const result = await oc.session.prompt({
     sessionID,
     parts: [{ type: "text", text: prompt }],
     format: {
@@ -161,12 +153,9 @@ function parseVerdict(data: any, round: number): ReviewVerdict {
 }
 
 export async function closeReviewerSession() {
-  if (_oc && _sessionID) {
-    await _oc.client.session.delete({ sessionID: _sessionID })
+  const oc = await getOc()
+  if (_sessionID) {
+    await oc.session.delete({ sessionID: _sessionID })
     _sessionID = null
-  }
-  if (_oc) {
-    _oc.server.close()
-    _oc = null
   }
 }

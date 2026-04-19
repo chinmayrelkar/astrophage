@@ -1,4 +1,5 @@
-import { createOpencode } from "@opencode-ai/sdk/v2"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import { getClient } from "../client.js"
 import type { BugSeed, Patch, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
@@ -7,17 +8,8 @@ import { agentTurn, emit } from "../transcript.js"
 // Iteration 0: Given a pre-seeded bug, proposes a fix.
 // Iteration 1+: Iterates based on test failures and reviewer feedback.
 
-type OC = Awaited<ReturnType<typeof createOpencode>>
-
-let _oc: OC | null = null
-
-async function getOc(): Promise<OC> {
-  if (!_oc) {
-    _oc = await createOpencode({
-      config: { model: "anthropic/claude-sonnet-4-5" },
-    })
-  }
-  return _oc
+async function getOc(): Promise<OpencodeClient> {
+  return getClient()
 }
 
 let _sessionID: string | null = null
@@ -25,13 +17,13 @@ let _sessionID: string | null = null
 async function ensureSession(): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    const res = await oc.client.session.create({
+    const res = await oc.session.create({
       title: "Astrophage Coder",
     })
     _sessionID = res.data!.id
 
     // Inject system context once (noReply = no AI response)
-    await oc.client.session.prompt({
+    await oc.session.prompt({
       sessionID: _sessionID,
       noReply: true,
       parts: [
@@ -102,7 +94,7 @@ ${bug.buggyCode}
 
 Propose a minimal, correct fix. Follow the output format specified.`
 
-  const result = await oc.client.session.prompt({
+  const result = await oc.session.prompt({
     sessionID,
     parts: [{ type: "text", text: prompt }],
   })
@@ -149,7 +141,7 @@ export async function iterateFix(
 
   context += "Revise your fix to address these issues. Follow the output format."
 
-  const result = await oc.client.session.prompt({
+  const result = await oc.session.prompt({
     sessionID,
     parts: [{ type: "text", text: context }],
   })
@@ -180,12 +172,9 @@ function extractText(data: any): string {
 }
 
 export async function closeCoderSession() {
-  if (_oc && _sessionID) {
-    await _oc.client.session.delete({ sessionID: _sessionID })
+  const oc = await getOc()
+  if (_sessionID) {
+    await oc.session.delete({ sessionID: _sessionID })
     _sessionID = null
-  }
-  if (_oc) {
-    _oc.server.close()
-    _oc = null
   }
 }
