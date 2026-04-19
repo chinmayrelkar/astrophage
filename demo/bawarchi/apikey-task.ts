@@ -1,28 +1,26 @@
-/**
- * Demo Task: API key in URL bug
- *
- * Iteration 2 demo. Reviewer kills this in round 1 (key in URL = non-negotiable).
- * Contrast with OAuth's 3-round negotiation.
- */
-
 import type { Task } from "../../src/types.js"
 
 export const apikeyTask: Task = {
   id: "bawarchi-apikey-001",
   title: "Fix API key auth: key must not appear in URL",
   description: `
-A bawarchi-generated REST CLI has been found passing the API key as a URL
-query parameter (?api_key=...). This is a non-negotiable constitution violation:
-credentials must never be passed via URL query parameters.
+A bawarchi-generated REST CLI passes the API key as a URL query parameter
+(?api_key=...). This is a non-negotiable constitution violation: credentials
+must never be passed via URL query parameters.
 
 The fix must:
 1. Remove the api_key query parameter from the URL
 2. Pass the API key via the Authorization header instead (Bearer or custom scheme)
 3. Read the key from an env var, never hardcode it
 
-The reviewer will block this IMMEDIATELY in round 1 — no negotiation.
-This contrasts with the OAuth task which runs 3 rounds.
+The reviewer will block this immediately in round 1 — no negotiation.
+This contrasts with the OAuth task which runs multiple rounds.
   `.trim(),
+  repo: {
+    localPath: "/home/ubuntu/bawarchi",
+    remoteUrl: "https://github.com/chinmayrelkar/bawarchi.git",
+    defaultBranch: "main",
+  },
   bugSeed: {
     file: "internal/generator/rest.go",
     startLine: 76,

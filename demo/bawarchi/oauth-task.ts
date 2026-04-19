@@ -1,10 +1,3 @@
-/**
- * Demo Task: OAuth auth bug in bawarchi gRPC generator
- *
- * Pre-seeded task for Iteration 0 demo. The coder is handed this bug;
- * it does not discover it. The reviewer evaluates the proposed fix.
- */
-
 import type { Task } from "../../src/types.js"
 
 export const oauthTask: Task = {
@@ -24,6 +17,11 @@ This is a NON-NEGOTIABLE constitution violation (auth must never silently succee
 The reviewer should accept a fix that adds a hard error, and may negotiate
 on error message wording only.
   `.trim(),
+  repo: {
+    localPath: "/home/ubuntu/bawarchi",
+    remoteUrl: "https://github.com/chinmayrelkar/bawarchi.git",
+    defaultBranch: "main",
+  },
   bugSeed: {
     file: "internal/generator/grpc.go",
     startLine: 70,

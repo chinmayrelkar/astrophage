@@ -5,20 +5,52 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
 
 // ─── Shared OpenCode client ───────────────────────────────────────────────────
+// Points at the bawarchi repo so agents can read/edit its files directly.
+//
+// Reuses the existing OpenCode server if one is running and responding with
+// JSON (i.e. it's the API server, not the TUI web app which returns HTML).
+// Falls back to spawning a dedicated server on port 4097.
+
+const DIR = "/home/ubuntu/bawarchi"
+
 let _client: OpencodeClient | null = null
 let _serverClose: (() => void) | null = null
+
+async function probeApiServer(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/v2/app`, { signal: AbortSignal.timeout(1500) })
+    const ct = res.headers.get("content-type") ?? ""
+    return ct.includes("application/json")
+  } catch {
+    return false
+  }
+}
 
 export async function getClient(): Promise<OpencodeClient> {
   if (_client) return _client
 
-  // Point the server at the bawarchi repo so agents can read/edit its files directly
-  const dir = "/home/ubuntu/bawarchi"
-  console.log(`[ASTROPHAGE] Starting dedicated OpenCode server (dir: ${dir})...`)
+  // 1. Check env var set by opencode TUI
+  const envURL = process.env["OPENCODE_SERVER_URL"]
+  if (envURL && await probeApiServer(envURL)) {
+    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${envURL}`)
+    _client = createOpencodeClient({ baseUrl: envURL, directory: DIR })
+    return _client
+  }
 
+  // 2. Probe default port — but only accept if it responds with JSON
+  const defaultURL = "http://127.0.0.1:4096"
+  if (await probeApiServer(defaultURL)) {
+    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${defaultURL}`)
+    _client = createOpencodeClient({ baseUrl: defaultURL, directory: DIR })
+    return _client
+  }
+
+  // 3. Spawn dedicated server on 4097 (TUI is on 4096, won't conflict)
+  console.log(`[ASTROPHAGE] Starting dedicated OpenCode server (dir: ${DIR})...`)
   const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 4097 })
   _serverClose = server.close
   console.log(`[ASTROPHAGE] OpenCode server ready at ${server.url}`)
-  _client = createOpencodeClient({ baseUrl: server.url, directory: dir })
+  _client = createOpencodeClient({ baseUrl: server.url, directory: DIR })
   return _client
 }
 

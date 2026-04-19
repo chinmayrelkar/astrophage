@@ -1,10 +1,14 @@
 /**
  * Astrophage — Iteration 0
  *
- * One round: coder proposes fix for seeded bug → reviewer accepts/rejects.
- * Raw transcript prints to terminal. SSE server streams events to web UI.
+ * One round: coder proposes fix → reviewer accepts/rejects.
+ * Transcript printed to terminal. SSE server streams events to web UI.
  *
- * Usage: npx tsx src/main.ts
+ * Usage:
+ *   npx tsx src/main.ts              # defaults to 'oauth' task
+ *   npx tsx src/main.ts oauth        # OAuth gRPC auth bug
+ *   npx tsx src/main.ts apikey       # API key in URL bug
+ *   npx tsx src/main.ts --list       # list all available tasks
  */
 
 import { startServer, startRun, finishRun, setCurrentTask } from "./server.js"
@@ -12,42 +16,33 @@ import { proposeInitialFix, closeCoderSession } from "./agents/coder.js"
 import { reviewPatch, closeReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
 import { closeServer } from "./client.js"
-import type { Task, BugSeed, PipelineResult } from "./types.js"
+import { TASKS, listTasks } from "../demo/index.js"
+import type { Task, PipelineResult } from "./types.js"
 
-// ─── Seeded task (Iteration 0: hardcoded) ────────────────────────────────────
+// ─── CLI argument parsing ─────────────────────────────────────────────────────
 
-const oauthBug: BugSeed = {
-  file: "internal/generator/grpc.go",
-  startLine: 70,
-  endLine: 72,
-  description:
-    "gRPC auth is optional and silent. If the auth env var is missing, the " +
-    "generated CLI silently proceeds without authentication instead of " +
-    "exiting with an error. This violates the constitution: auth must never " +
-    "silently succeed.",
-  buggyCode: `\tif key := os.Getenv(authEnvVar); key != "" {
-\t\targs = append(args, "-H", "Authorization: Bearer "+key)
-\t}`,
+const arg = process.argv[2]
+
+if (arg === "--list" || arg === "-l") {
+  listTasks()
+  process.exit(0)
 }
 
-const task: Task = {
-  id: "bawarchi-oauth-001",
-  title: "Fix gRPC auth: silent skip must become hard error",
-  description:
-    "The bawarchi-generated gRPC CLI skips authentication silently when the " +
-    "auth env var is unset. The fix must make this a hard error with a clear " +
-    "message naming the missing env var.",
-  repo: {
-    localPath: "/home/ubuntu/bawarchi",
-    remoteUrl: "https://github.com/chinmayrelkar/bawarchi.git",
-    defaultBranch: "main",
-  },
-  bugSeed: oauthBug,
+const taskKey = arg ?? "oauth"
+const task: Task | undefined = TASKS[taskKey]
+
+if (!task) {
+  console.error(`\nUnknown task: "${taskKey}"`)
+  listTasks()
+  process.exit(1)
 }
+
+// TypeScript can't narrow past process.exit — assert non-null from here
+const activeTask = task as Task
 
 // ─── Iteration 0 pipeline: one round ─────────────────────────────────────────
 
-async function runIteration0(): Promise<PipelineResult> {
+async function runIteration0(task: Task): Promise<PipelineResult> {
   const round = 1
   roundStart(round)
 
@@ -102,16 +97,15 @@ async function runIteration0(): Promise<PipelineResult> {
 async function main() {
   console.log("\n" + "█".repeat(70))
   console.log("  ASTROPHAGE — Iteration 0")
-  console.log("  Task: " + task.title)
+  console.log(`  Task [${taskKey}]: ${activeTask.title}`)
   console.log("█".repeat(70) + "\n")
 
-  // Start SSE server so web UI can connect
   await startServer(3001)
-  setCurrentTask({ id: task.id, title: task.title, description: task.description, repo: task.repo })
-  startRun(task.id, task.title)
+  setCurrentTask({ id: activeTask.id, title: activeTask.title, description: activeTask.description, repo: activeTask.repo })
+  startRun(activeTask.id, activeTask.title)
 
   try {
-    const result = await runIteration0()
+    const result = await runIteration0(activeTask)
     finishRun(result.status)
     process.exit(result.status === "merged" ? 0 : 1)
   } catch (err) {
