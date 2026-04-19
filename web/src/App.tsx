@@ -1,15 +1,15 @@
 import { useState, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
 import { useSpaceState } from "./space/useSpaceState"
 import { SpaceCanvas } from "./space/SpaceCanvas"
 import { MissionLog } from "./space/MissionLog"
 import { TaskHistory } from "./space/TaskHistory"
+import { NewTaskModal } from "./components/NewTaskModal"
 import type { AgentName } from "./hooks/useAgentStream"
 
 export default function App() {
-  const navigate = useNavigate()
   const [selectedAgent, setSelectedAgent] = useState<AgentName | null>(null)
   const [logOpen, setLogOpen] = useState(true)
+  const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [_selectedRun, setSelectedRun] = useState<string | null>(null)
 
   const { agents, beams, log, currentRound, connected, task, runs } = useSpaceState()
@@ -45,25 +45,14 @@ export default function App() {
         background: "rgba(5,5,20,0.9)",
         zIndex: 10,
       }}>
-        <button
-          onClick={() => navigate("/")}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
-            fontFamily: "inherit",
-          }}
-        >
-          <span style={{ fontWeight: 700, fontSize: "14px", letterSpacing: "0.2em", color: "white" }}>
-            ASTROPHAGE
-          </span>
-        </button>
+        <span style={{ fontWeight: 700, fontSize: "14px", letterSpacing: "0.2em", color: "white" }}>
+          ASTROPHAGE
+        </span>
         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.25)", letterSpacing: "0.1em" }}>
           PROJECT HAIL MARY · AGENT COMPANY
         </span>
 
-        {task && (
+        {task ? (
           <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "8px" }}>
             <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)" }}>▶</span>
             <span style={{ fontSize: "11px", color: "rgba(255,220,80,0.9)", fontWeight: 700 }}>
@@ -83,9 +72,32 @@ export default function App() {
               </span>
             )}
           </div>
+        ) : (
+          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", marginLeft: "8px" }}>
+            awaiting mission
+          </span>
         )}
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* New Task button */}
+          <button
+            onClick={() => setTaskModalOpen(true)}
+            style={{
+              background: "rgba(255,220,80,0.1)",
+              border: "1px solid rgba(255,220,80,0.3)",
+              borderRadius: "3px",
+              color: "rgba(255,220,80,0.85)",
+              cursor: "pointer",
+              fontSize: "9px",
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              padding: "3px 12px",
+              fontFamily: "inherit",
+            }}
+          >
+            + NEW TASK
+          </button>
+
           <button
             onClick={() => setLogOpen((v) => !v)}
             style={{
@@ -118,7 +130,6 @@ export default function App() {
 
       {/* Main area: canvas + log panel */}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        {/* Space canvas */}
         <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <SpaceCanvas
             agents={agents}
@@ -127,25 +138,18 @@ export default function App() {
             task={task}
             onShipClick={handleShipClick}
           />
-
-          {/* Click hint */}
           {!logOpen && (
             <div style={{
-              position: "absolute",
-              bottom: "16px",
-              left: "50%",
+              position: "absolute", bottom: "16px", left: "50%",
               transform: "translateX(-50%)",
-              fontSize: "9px",
-              color: "rgba(255,255,255,0.2)",
-              letterSpacing: "0.08em",
-              pointerEvents: "none",
+              fontSize: "9px", color: "rgba(255,255,255,0.2)",
+              letterSpacing: "0.08em", pointerEvents: "none",
             }}>
-              click a ship to inspect · SHOW LOG for mission comms
+              click a ship to inspect · + NEW TASK to launch a mission
             </div>
           )}
         </div>
 
-        {/* Mission log panel */}
         {logOpen && (
           <div style={{ width: "340px", flexShrink: 0, borderLeft: "1px solid rgba(255,255,255,0.06)" }}>
             <MissionLog
@@ -158,8 +162,9 @@ export default function App() {
         )}
       </div>
 
-      {/* Task history strip */}
       <TaskHistory runs={runs} onSelect={setSelectedRun} />
+
+      {taskModalOpen && <NewTaskModal onClose={() => setTaskModalOpen(false)} />}
     </div>
   )
 }

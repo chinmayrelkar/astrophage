@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/main.ts",
-    "dev": "tsx watch src/main.ts"
+    "dev": "tsx watch src/main.ts",
+    "submit": "tsx src/submit.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
