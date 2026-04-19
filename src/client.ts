@@ -2,6 +2,7 @@ import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { AgentName } from "./types.js"
 import { emit } from "./transcript.js"
+import { startTurn, endTurn, recordDelta } from "./token-tracker.js"
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
@@ -57,6 +58,7 @@ function startEventLoop(client: OpencodeClient): void {
           if (!agentName) continue
           // Only forward text field deltas (not tool input etc.)
           if (props.field !== "text") continue
+          recordDelta(props.sessionID, props.delta)
           emit(agentName, "token", props.delta, 0)
         }
       } catch (err) {
@@ -130,6 +132,8 @@ export interface PromptParams {
   parts: Array<{ type: "text"; text: string }>
   format?: { type: "json_schema"; schema: Record<string, unknown> }
   noReply?: boolean
+  /** Round number, used for token tracking */
+  round?: number
 }
 
 export interface PromptResult {
@@ -149,6 +153,12 @@ export async function promptAndWait(
     })
     return { text: "", structured: null }
   }
+
+  // Start tracking this turn
+  const agentName = _sessionRegistry.get(params.sessionID) ?? "orchestrator"
+  const round = params.round ?? 0
+  const inputText = params.parts.map((p) => p.text).join("\n")
+  startTurn(params.sessionID, agentName, round)
 
   // Count messages before so we know when a new one arrives
   const before = await client.session.messages({ sessionID: params.sessionID, limit: 20 })
@@ -191,12 +201,18 @@ export async function promptAndWait(
           .map((p) => p.text ?? "")
           .join("")
         const structured = (last.info as Record<string, unknown>)["structured"] ?? null
+
+        // End turn tracking
+        endTurn(params.sessionID, inputText)
+
         return { text: textParts, structured }
       }
     }
   }
 
   process.stdout.write("]\n")
+  // End turn tracking even on timeout
+  endTurn(params.sessionID, inputText)
   throw new Error(`[ASTROPHAGE] Timeout waiting for model response after ${TIMEOUT_MS}ms`)
 }
 
