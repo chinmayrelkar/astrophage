@@ -1,5 +1,5 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import { getClient, promptAndWait } from "../client.js"
+import { getClient, promptAndWait, registerSession, unregisterSession } from "../client.js"
 import type { Task, Patch, RepoContext, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
@@ -28,6 +28,7 @@ async function ensureSession(repo: RepoContext): Promise<string> {
       ],
     })
     _sessionID = res.data!.id
+    registerSession(_sessionID, "coder")
 
     await promptAndWait(oc, {
       sessionID: _sessionID,
@@ -70,6 +71,7 @@ export async function proposeAndOpenPR(task: Task, round: number): Promise<PRInf
   const sessionID = await ensureSession(task.repo)
 
   emit("coder", "turn_start", "Exploring repo, fixing bug, opening PR", round)
+  emit("coder", "git_action", `Branch created, committing fix...`, round)
   console.log(`\n[CODER] Starting round ${round} — will explore, fix, and open PR`)
 
   const prompt = `Here is your task:
@@ -109,6 +111,7 @@ PR_URL: https://github.com/...`
   patch.explanation = result.text.slice(0, 400)
 
   agentTurn("coder", `PR opened: ${prUrl}`, `Branch: ${branch}`, round)
+  emit("coder", "git_action", `Branch created, committing fix...`, round)
   emit("coder", "git_action", `PR opened: ${prUrl}`, round)
 
   return { url: prUrl, number: prNumber, branch, patch }
@@ -125,6 +128,7 @@ export async function iterateOnPRFeedback(
   const sessionID = await ensureSession(task.repo)
 
   emit("coder", "turn_start", `Reading PR review comments and updating fix (round ${round})`, round)
+  emit("coder", "git_action", `Reading review comments...`, round)
   console.log(`\n[CODER] Iterating on PR feedback — round ${round}`)
 
   const prompt = `The reviewer has posted review comments on your PR.
@@ -147,6 +151,7 @@ Do not open a new PR — update the existing one.`
   })
 
   agentTurn("coder", `PR updated (round ${round})`, `Force-pushed to ${pr.branch}`, round)
+  emit("coder", "git_action", `Force-pushing update to PR...`, round)
   emit("coder", "git_action", `PR updated: ${pr.url}`, round)
 }
 
@@ -169,6 +174,7 @@ function parseCoderResponse(raw: string, fallbackFile: string): Patch {
 export async function closeCoderSession() {
   const oc = await getOc()
   if (_sessionID) {
+    unregisterSession(_sessionID)
     await oc.session.delete({ sessionID: _sessionID }).catch(() => {})
     _sessionID = null
   }
