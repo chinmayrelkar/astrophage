@@ -1,0 +1,198 @@
+{
+  "name": "astrophage-eval-set-v1",
+  "description": "Named eval set for the Astrophage multi-agent PR pipeline. Tests scoring/parsing logic without running the full agent stack.",
+  "version": "1",
+  "cases": [
+    {
+      "id": "reviewer-accept-clean-pr",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict correctly extracts an ACCEPT decision from a clean reviewer response",
+      "input": {
+        "agentOutput": "I reviewed the PR diff carefully. The change correctly reads credentials from an environment variable and exits with a clear error when it is missing. No hardcoded secrets detected.\n{\"decision\":\"accept\",\"reason\":\"Change reads credentials from environment variable, exits cleanly on missing auth, no plaintext token exchange\",\"nonNegotiable\":false}",
+        "round": 1
+      },
+      "expectedOutcome": {
+        "decision": "accept",
+        "nonNegotiable": false
+      },
+      "passCriteria": "decision === 'accept'"
+    },
+    {
+      "id": "reviewer-reject-hardcoded-secret",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict correctly detects a NON-NEGOTIABLE rejection when a hardcoded secret is present",
+      "input": {
+        "agentOutput": "Found a hardcoded API key on line 42. This violates the non-negotiable constitution rule.\n{\"decision\":\"reject\",\"reason\":\"Hardcoded API key found: client_id='AKIAIOSFODNN7EXAMPLE'\",\"violatedRule\":\"No hardcoded secrets, API keys, or client_ids in source code\",\"nonNegotiable\":true}",
+        "round": 1
+      },
+      "expectedOutcome": {
+        "decision": "reject",
+        "nonNegotiable": true,
+        "violatedRuleContains": "hardcoded"
+      },
+      "passCriteria": "decision === 'reject' && nonNegotiable === true"
+    },
+    {
+      "id": "reviewer-reject-negotiable-style",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict extracts a negotiable REJECT (e.g. naming convention) and sets nonNegotiable to false",
+      "input": {
+        "agentOutput": "The code looks functionally correct but the env var is named MY_APP_TOKEN instead of the project convention MY_APP__TOKEN.\n{\"decision\":\"reject\",\"reason\":\"Environment variable should use double-underscore convention: MY_APP__TOKEN\",\"violatedRule\":\"Environment variable naming convention\",\"nonNegotiable\":false}",
+        "round": 2
+      },
+      "expectedOutcome": {
+        "decision": "reject",
+        "nonNegotiable": false
+      },
+      "passCriteria": "decision === 'reject' && nonNegotiable === false"
+    },
+    {
+      "id": "reviewer-parse-fenced-json",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict handles JSON wrapped in markdown code fences (common LLM output pattern)",
+      "input": {
+        "agentOutput": "The change looks great. Here is my verdict:\n\n```json\n{\"decision\":\"accept\",\"reason\":\"All constitution rules satisfied\",\"nonNegotiable\":false}\n```",
+        "round": 1
+      },
+      "expectedOutcome": {
+        "decision": "accept",
+        "nonNegotiable": false
+      },
+      "passCriteria": "decision === 'accept'"
+    },
+    {
+      "id": "reviewer-parse-fallback-on-garbage",
+      "category": "reviewer-parsing",
+      "description": "parseVerdict returns a synthetic reject verdict when the agent response contains no valid JSON — prevents the pipeline from hanging",
+      "input": {
+        "agentOutput": "I looked at the code. It seems fine to me. Nothing wrong here.",
+        "round": 3
+      },
+      "expectedOutcome": {
+        "decision": "reject",
+        "reasonContains": "Could not parse"
+      },
+      "passCriteria": "decision === 'reject' && reason.startsWith('Could not parse')"
+    },
+    {
+      "id": "tester-pass-explicit",
+      "category": "tester-parsing",
+      "description": "parseTestResult correctly identifies a PASS when the agent outputs 'ok' and ends with PASS",
+      "input": {
+        "agentOutput": "Running tests in /home/ubuntu/bawarchi...\nok  \tgithub.com/chinmayrelkar/bawarchi\t0.234s\n\nAll tests passed.\nPASS",
+        "round": 1
+      },
+      "expectedOutcome": {
+        "passed": true,
+        "failures": []
+      },
+      "passCriteria": "passed === true && failures.length === 0"
+    },
+    {
+      "id": "tester-fail-explicit",
+      "category": "tester-parsing",
+      "description": "parseTestResult correctly identifies a FAIL when go test output contains '--- FAIL'",
+      "input": {
+        "agentOutput": "Running go test ./...\n--- FAIL: TestHandleAuth (0.01s)\n    auth_test.go:23: expected error when token missing, got nil\nFAIL\tgithub.com/chinmayrelkar/bawarchi\t0.015s\n\nFAIL",
+        "round": 2
+      },
+      "expectedOutcome": {
+        "passed": false,
+        "failuresNonEmpty": true
+      },
+      "passCriteria": "passed === false && failures.length > 0"
+    },
+    {
+      "id": "tester-pass-no-test-files",
+      "category": "tester-parsing",
+      "description": "parseTestResult treats 'no test files' as a pass — not every package has tests",
+      "input": {
+        "agentOutput": "cd /home/ubuntu/bawarchi && go test ./...\n?   \tgithub.com/chinmayrelkar/bawarchi/cmd\t[no test files]\n\nPASS",
+        "round": 1
+      },
+      "expectedOutcome": {
+        "passed": true
+      },
+      "passCriteria": "passed === true"
+    },
+    {
+      "id": "pipeline-convergence-accept-round1",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a pass+accept in round 1 immediately sets status to 'merged'",
+      "input": {
+        "rounds": [
+          {
+            "number": 1,
+            "testPassed": true,
+            "verdictDecision": "accept",
+            "verdictNonNegotiable": false
+          }
+        ],
+        "maxRounds": 5
+      },
+      "expectedOutcome": {
+        "finalStatus": "merged",
+        "roundsConsumed": 1
+      },
+      "passCriteria": "finalStatus === 'merged' && roundsConsumed === 1"
+    },
+    {
+      "id": "pipeline-convergence-nonneg-block",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a non-negotiable reject on round 1 sets status to 'unresolved' and stops immediately",
+      "input": {
+        "rounds": [
+          {
+            "number": 1,
+            "testPassed": true,
+            "verdictDecision": "reject",
+            "verdictNonNegotiable": true
+          }
+        ],
+        "maxRounds": 5
+      },
+      "expectedOutcome": {
+        "finalStatus": "unresolved",
+        "roundsConsumed": 1
+      },
+      "passCriteria": "finalStatus === 'unresolved' && roundsConsumed === 1"
+    },
+    {
+      "id": "pipeline-convergence-max-rounds",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: repeated negotiable rejects exhaust MAX_ROUNDS and result in 'unresolved'",
+      "input": {
+        "rounds": [
+          { "number": 1, "testPassed": true, "verdictDecision": "reject", "verdictNonNegotiable": false },
+          { "number": 2, "testPassed": true, "verdictDecision": "reject", "verdictNonNegotiable": false },
+          { "number": 3, "testPassed": true, "verdictDecision": "reject", "verdictNonNegotiable": false },
+          { "number": 4, "testPassed": true, "verdictDecision": "reject", "verdictNonNegotiable": false },
+          { "number": 5, "testPassed": true, "verdictDecision": "reject", "verdictNonNegotiable": false }
+        ],
+        "maxRounds": 5
+      },
+      "expectedOutcome": {
+        "finalStatus": "unresolved",
+        "roundsConsumed": 5
+      },
+      "passCriteria": "finalStatus === 'unresolved' && roundsConsumed === 5"
+    },
+    {
+      "id": "pipeline-convergence-test-fail-then-pass",
+      "category": "pipeline-convergence",
+      "description": "Pipeline convergence logic: a test failure on round 1 followed by pass+accept on round 2 results in 'merged'",
+      "input": {
+        "rounds": [
+          { "number": 1, "testPassed": false, "verdictDecision": null, "verdictNonNegotiable": false },
+          { "number": 2, "testPassed": true, "verdictDecision": "accept", "verdictNonNegotiable": false }
+        ],
+        "maxRounds": 5
+      },
+      "expectedOutcome": {
+        "finalStatus": "merged",
+        "roundsConsumed": 2
+      },
+      "passCriteria": "finalStatus === 'merged' && roundsConsumed === 2"
+    }
+  ]
+}

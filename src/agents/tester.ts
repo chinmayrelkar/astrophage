@@ -115,7 +115,7 @@ End your response with one of:
 
 // ─── Parse go test output ─────────────────────────────────────────────────────
 
-function parseTestResult(text: string, round: number): TestResult {
+export function parseTestResult(text: string, round: number): TestResult {
   const upper = text.toUpperCase()
 
   // Treat "no test files" / "no Go files" as passed — nothing to test
