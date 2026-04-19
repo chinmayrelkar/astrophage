@@ -11,6 +11,7 @@
 import { proposeAndOpenPR, iterateOnPRFeedback, closeCoderSession, resetCoderSession } from "./agents/coder.js"
 import type { PRInfo } from "./agents/coder.js"
 import { reviewPR, approveAndMergePR, closeReviewerSession, resetReviewerSession } from "./agents/reviewer.js"
+import { runTests, closeTesterSession, resetTesterSession } from "./agents/tester.js"
 import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
@@ -31,6 +32,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   // Fresh sessions for every run
   await resetCoderSession()
   await resetReviewerSession()
+  await resetTesterSession()
 
   setCurrentTask({ id: task.id, title: task.title, description: task.description, repo: task.repo })
   startRun(task.id, task.title)
@@ -58,13 +60,38 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         await iterateOnPRFeedback(task, pr!, round)
       }
 
+      // ── Tester ───────────────────────────────────────────────────────────
+      const testResult = await runTests(pr!, task.repo, round)
+
+      if (!testResult.passed) {
+        const failSummary = testResult.failures.slice(0, 3).join("; ") || "see output"
+        emit("orchestrator", "convergence", `TESTS FAILED round ${round}: ${failSummary}`, round)
+        console.log("\n" + "═".repeat(70))
+        console.log(`  [ROUND ${round}] Tests FAILED — coder will iterate`)
+        console.log(`  Failures: ${failSummary}`)
+        console.log("═".repeat(70))
+
+        rounds.push({
+          number: round,
+          patch: pr!.patch,
+          testResult,
+          verdict: { decision: "reject", reason: `Tests failed: ${failSummary}`, nonNegotiable: false, round },
+        })
+
+        if (round === MAX_ROUNDS) {
+          emit("orchestrator", "convergence", `[UNRESOLVED] Max rounds (${MAX_ROUNDS}) reached`, round)
+          console.log(`\n  [UNRESOLVED] Max rounds reached`)
+        }
+        continue
+      }
+
       // ── Reviewer ─────────────────────────────────────────────────────────
       const verdict = await reviewPR(pr!, task.repo, round)
 
       rounds.push({
         number: round,
         patch: pr!.patch,
-        testResult: { passed: false, output: "skipped", failures: [], round },
+        testResult,
         verdict,
       })
 
@@ -118,6 +145,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
     _running = false
     finishRun(finalStatus, pr?.url)
     await closeCoderSession()
+    await closeTesterSession()
     await closeReviewerSession()
     closeServer()
   }
