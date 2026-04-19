@@ -122,8 +122,9 @@ async function scanGitHubIssues(
   emit("scout", "turn_start", `[Pass A] GitHub issues: ${repoSlug}`, 0)
   console.log(`\n[SCOUT] Pass A — GitHub issues: ${repoSlug}`)
 
-  // Step 1: fetch and read
-  await promptAndWait(oc, {
+  // Step 1: fetch, read, and produce JSON in one shot
+  const seenList = [...seenKeys].filter((k) => k.startsWith(`github_issue:${repoSlug}#`)).join(", ")
+  const step1 = await promptAndWait(oc, {
     sessionID,
     parts: [{
       type: "text",
@@ -135,23 +136,11 @@ gh issue list --repo ${repoSlug} --state open --json number,title,body,labels,as
 Then for each issue run:
 gh issue view <number> --repo ${repoSlug} --comments
 
-Read through everything. Think about which are autonomously fixable.
-No output format yet — just explore and think.`,
-    }],
-  })
+Already-seen issue IDs (skip): [${seenList || "none"}]
 
-  // Step 2: structured decisions
-  const seenList = [...seenKeys].filter((k) => k.startsWith(`github_issue:${repoSlug}#`)).join(", ")
-  const result = await promptAndWait(oc, {
-    sessionID,
-    parts: [{
-      type: "text",
-      text: `Now produce your triage decisions for the GitHub issues you just read.
+If there are no open issues, output an empty array: []
 
-Already-seen (skip these): [${seenList || "none"}]
-
-Output ONLY a JSON array, no text before or after, no markdown fences:
-
+Otherwise output a JSON array of triage decisions:
 [
   {
     "issueNumber": 42,
@@ -159,7 +148,7 @@ Output ONLY a JSON array, no text before or after, no markdown fences:
     "actionable": true,
     "reason": "Clear security bug: API key in URL — straightforward code fix",
     "taskTitle": "Fix API key exposure in URL query parameter",
-    "taskDescription": "Detailed description for the coding agent: what is wrong, what the correct fix looks like, which files are likely involved."
+    "taskDescription": "Detailed description: what is wrong, what the fix looks like, which files."
   },
   {
     "issueNumber": 43,
@@ -173,7 +162,19 @@ Include every issue you read. Omit taskTitle/taskDescription for non-actionable 
     }],
   })
 
-  const decisions = parseIssueDecisions(result.text, repo, repoSlug)
+  let decisions = parseIssueDecisions(step1.text, repo, repoSlug)
+
+  if (decisions.length === 0 && !step1.text.includes("[]") && !step1.text.toLowerCase().includes("no open issues")) {
+    // Model didn't produce JSON — ask explicitly
+    const step2 = await promptAndWait(oc, {
+      sessionID,
+      parts: [{
+        type: "text",
+        text: `Output ONLY the JSON array of your triage decisions (or [] if no issues):`,
+      }],
+    })
+    decisions = parseIssueDecisions(step2.text, repo, repoSlug)
+  }
   console.log(`[SCOUT] Pass A done: ${decisions.length} issues, ${decisions.filter(d => d.actionable).length} actionable`)
   return decisions
 }
@@ -191,8 +192,10 @@ async function scanCode(
   emit("scout", "turn_start", `[Pass B] Code scan: ${repo.localPath}`, 0)
   console.log(`\n[SCOUT] Pass B — Code scan: ${repo.localPath}`)
 
-  // Step 1: explore the codebase
-  await promptAndWait(oc, {
+  // Step 1: explore + produce JSON in one shot
+  // (model often produces the JSON during exploration — capture it and try parsing immediately)
+  const seenList = [...seenKeys].filter((k) => k.startsWith(`code_scan:${repoSlug}:`)).join(", ")
+  const step1 = await promptAndWait(oc, {
     sessionID,
     parts: [{
       type: "text",
@@ -210,52 +213,57 @@ Look for:
 Run these commands to explore:
 ls ${repo.localPath}
 find ${repo.localPath} -name "*.go" -o -name "*.ts" -o -name "*.js" -o -name "*.py" | head -40
-grep -r "InsecureSkipVerify\|password\|secret\|api_key\|apikey\|TODO\|FIXME\|hardcoded" ${repo.localPath} --include="*.go" -l
-grep -r "InsecureSkipVerify\|password\|secret\|api_key\|apikey\|TODO\|FIXME\|hardcoded" ${repo.localPath} --include="*.go" -n
+grep -r "InsecureSkipVerify\\|password\\|secret\\|api_key\\|apikey\\|TODO\\|FIXME\\|hardcoded" ${repo.localPath} --include="*.go" -l
+grep -r "InsecureSkipVerify\\|password\\|secret\\|api_key\\|apikey\\|TODO\\|FIXME\\|hardcoded" ${repo.localPath} --include="*.go" -n
 
-Then read the relevant source files in full to understand the issues in context.
-No output format yet — just explore and think.`,
-    }],
-  })
+Read the relevant source files in full to understand each issue in context.
+Already-seen (skip): [${seenList || "none"}]
 
-  // Step 2: structured findings
-  const seenList = [...seenKeys].filter((k) => k.startsWith(`code_scan:${repoSlug}:`)).join(", ")
-  const result = await promptAndWait(oc, {
-    sessionID,
-    parts: [{
-      type: "text",
-      text: `Good. Now produce your code scan findings.
-
-Already-seen (skip these): [${seenList || "none"}]
-
-For each distinct issue you found in the code, produce one entry.
-Use a short slug as the ref (e.g. "tls-skip-verify-grpc-client", "hardcoded-secret-config-go").
-
-Output ONLY a JSON array, no text before or after, no markdown fences:
+When you are done exploring, output your findings as a JSON array.
+Use a short slug as the ref field.
 
 [
   {
-    "ref": "tls-skip-verify-grpc-client",
-    "filePath": "relative/path/from/repo/root.go",
+    "ref": "tls-skip-verify-grpc",
+    "filePath": "internal/generator/grpc.go",
     "actionable": true,
-    "reason": "InsecureSkipVerify: true found in grpc client — disables TLS verification",
-    "taskTitle": "Fix TLS verification bypass in gRPC client",
-    "taskDescription": "Detailed description for the coding agent: exact file, line area, what is wrong, what the correct fix looks like."
-  },
-  {
-    "ref": "todo-add-retry-logic",
-    "filePath": "cmd/server.go",
-    "actionable": false,
-    "reason": "TODO for retry logic — this is a feature enhancement, not a fixable bug"
+    "reason": "InsecureSkipVerify hardcoded in template",
+    "taskTitle": "Fix TLS verification bypass in gRPC template",
+    "taskDescription": "Exact file, lines, what is wrong, what the correct fix looks like."
   }
 ]
 
-Only include issues you actually found in the code. Be conservative — only flag clear violations.
-Omit taskTitle/taskDescription for non-actionable findings.`,
+Only flag clear violations. Be conservative.`,
     }],
   })
 
-  const decisions = parseCodeDecisions(result.text, repo, repoSlug)
+  // Try to parse from step 1 — if the model already produced valid JSON, use it directly
+  let decisions = parseCodeDecisions(step1.text, repo, repoSlug)
+
+  if (decisions.length === 0) {
+    // Step 2: model didn't produce JSON in step 1 — ask explicitly
+    const step2 = await promptAndWait(oc, {
+      sessionID,
+      parts: [{
+        type: "text",
+        text: `Now output ONLY the JSON array of your findings, nothing else:
+
+[
+  {
+    "ref": "slug",
+    "filePath": "path/to/file.go",
+    "actionable": true,
+    "reason": "...",
+    "taskTitle": "...",
+    "taskDescription": "..."
+  }
+]
+
+If you found no violations, output an empty array: []`,
+      }],
+    })
+    decisions = parseCodeDecisions(step2.text, repo, repoSlug)
+  }
   console.log(`[SCOUT] Pass B done: ${decisions.length} findings, ${decisions.filter(d => d.actionable).length} actionable`)
   return decisions
 }
@@ -299,7 +307,9 @@ function parseIssueDecisions(text: string, repo: RepoContext, repoSlug: string):
   for (const c of candidates) {
     try {
       const arr = JSON.parse(c)
-      if (!Array.isArray(arr) || arr.length === 0) continue
+      if (!Array.isArray(arr)) continue
+      // Empty array = no issues — valid, return cleanly
+      if (arr.length === 0) return []
       const decisions: ScoutDecision[] = []
       for (const item of arr) {
         if (typeof item.issueNumber !== "number") continue
@@ -318,9 +328,11 @@ function parseIssueDecisions(text: string, repo: RepoContext, repoSlug: string):
         }
         decisions.push({ source: "github_issue", ref, url, repo, actionable, reason: String(item.reason ?? ""), task })
       }
-      if (decisions.length > 0) return decisions
+      // Return even if decisions is empty (items existed but none had issueNumber)
+      return decisions
     } catch { /* try next */ }
   }
+  // No parseable array found at all — warn only in this case
   console.warn(`[SCOUT] Could not parse issue decisions. Raw: ${text.slice(0, 300)}`)
   return []
 }
@@ -330,7 +342,9 @@ function parseCodeDecisions(text: string, repo: RepoContext, repoSlug: string): 
   for (const c of candidates) {
     try {
       const arr = JSON.parse(c)
-      if (!Array.isArray(arr) || arr.length === 0) continue
+      if (!Array.isArray(arr)) continue
+      // Empty array = no violations found — valid
+      if (arr.length === 0) return []
       const decisions: ScoutDecision[] = []
       for (const item of arr) {
         if (!item.ref) continue
@@ -351,7 +365,7 @@ function parseCodeDecisions(text: string, repo: RepoContext, repoSlug: string): 
         }
         decisions.push({ source: "code_scan", ref, url, repo, actionable, reason: String(item.reason ?? ""), task })
       }
-      if (decisions.length > 0) return decisions
+      return decisions
     } catch { /* try next */ }
   }
   console.warn(`[SCOUT] Could not parse code decisions. Raw: ${text.slice(0, 300)}`)

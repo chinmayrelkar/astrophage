@@ -138,113 +138,90 @@ export async function runProductCycle(
   emit("product", "turn_start", `Product cycle — reading ${repoSlug}`, 0)
   console.log(`\n[PRODUCT — Lokken] Starting product cycle for ${repoSlug}`)
 
-  // ── Step 1: Read GitHub issues and discussions ────────────────────────────
-  await promptAndWait(oc, {
+  // ── Step 1: Explore + produce backlog JSON in one shot ───────────────────
+  const seenStr = [...seenIssueKeys].join(", ") || "none"
+  const existingStr = existingBacklog.length > 0
+    ? existingBacklog.map((i) => `  - [${i.id}] ${i.title} (${i.priority}, ${i.type})`).join("\n")
+    : "  (empty — this is the first cycle)"
+
+  const step1 = await promptAndWait(oc, {
     sessionID,
     parts: [{
       type: "text",
-      text: `Read all open GitHub issues and discussions for ${repoSlug} to understand what users and contributors want.
+      text: `Read all open GitHub issues and discussions for ${repoSlug}, then produce a feature backlog.
 
 Run:
 gh issue list --repo ${repoSlug} --state open --json number,title,body,labels,comments --limit 50
 gh issue list --repo ${repoSlug} --state closed --json number,title,body,labels --limit 20
-
-Also read the existing README and any docs:
 cat ${repo.localPath}/README.md 2>/dev/null || echo "no README"
-ls ${repo.localPath}/docs 2>/dev/null || echo "no docs dir"
 
-Existing backlog items (already tracked, do not duplicate):
-${existingBacklog.length > 0
-  ? existingBacklog.map((i) => `  - [${i.id}] ${i.title} (${i.priority}, ${i.type})`).join("\n")
-  : "  (empty — this is the first cycle)"}
+Existing backlog (do not duplicate):
+${existingStr}
 
-Read everything. Think about:
-- What are users asking for most?
-- What themes emerge across multiple issues?
-- What features would have the highest impact?
-- What is unclear or risky enough to need a spike first?
+Already-seen issue keys (skip): [${seenStr}]
 
-No output format yet — just explore and think.`,
-    }],
-  })
-
-  // ── Step 2: Produce structured backlog ────────────────────────────────────
-  const backlogResult = await promptAndWait(oc, {
-    sessionID,
-    parts: [{
-      type: "text",
-      text: `Good. Now produce the updated feature backlog.
-
-Only include NEW items not already in the existing backlog.
-Already-seen issue keys to skip: [${[...seenIssueKeys].join(", ") || "none"}]
-
-Output ONLY a JSON array, no text before or after, no markdown fences:
+After reading, output a JSON array of NEW backlog items only.
+Each item needs: id, title, description (full, actionable), type (feature|spike), priority (critical|high|medium|low), sourceRefs, complexity (1-5), feasibilityKnown (bool), spikeQuestion (string|null).
 
 [
   {
-    "id": "feat-auth-refresh-tokens",
-    "title": "Add OAuth refresh token support",
-    "description": "Full description for the coding agent: what to build, acceptance criteria, which files are likely involved.",
+    "id": "feat-request-body",
+    "title": "Add request body support to REST generator",
+    "description": "...",
     "type": "feature",
-    "priority": "high",
-    "sourceRefs": ["https://github.com/${repoSlug}/issues/12", "https://github.com/${repoSlug}/issues/34"],
+    "priority": "critical",
+    "sourceRefs": [],
     "complexity": 3,
     "feasibilityKnown": true,
     "spikeQuestion": null
-  },
-  {
-    "id": "spike-graphql-feasibility",
-    "title": "Spike: can we add GraphQL without breaking REST?",
-    "description": "Investigate whether GraphQL can coexist with the current REST layer. Produce a recommendation.",
-    "type": "spike",
-    "priority": "medium",
-    "sourceRefs": ["https://github.com/${repoSlug}/issues/45"],
-    "complexity": 2,
-    "feasibilityKnown": false,
-    "spikeQuestion": "Can GraphQL be added without breaking existing REST clients or requiring a full rewrite?"
   }
-]
-
-Priority must be one of: critical, high, medium, low
-Type must be one of: feature, spike
-complexity: 1–5
-feasibilityKnown: true if you are confident this can be built directly, false if a spike is needed first`,
+]`,
     }],
   })
 
-  const newItems = parseBacklogItems(backlogResult.text, repo)
+  // Try parsing from step 1 directly
+  let newItems = parseBacklogItems(step1.text, repo)
+
+  if (newItems.length === 0) {
+    // Step 2: model didn't produce JSON — ask explicitly
+    const step2 = await promptAndWait(oc, {
+      sessionID,
+      parts: [{
+        type: "text",
+        text: `Now output ONLY the JSON array of new backlog items, nothing else. If nothing new, output [].`,
+      }],
+    })
+    newItems = parseBacklogItems(step2.text, repo)
+  }
+
   console.log(`[PRODUCT — Lokken] ${newItems.length} new backlog item(s)`)
 
   // ── Step 3: Produce roadmap themes ───────────────────────────────────────
   const fullBacklog = [...existingBacklog, ...newItems]
 
-  const roadmapResult = await promptAndWait(oc, {
+  const themesStep1 = await promptAndWait(oc, {
     sessionID,
     parts: [{
       type: "text",
-      text: `Now synthesize the full backlog into a roadmap with themes.
+      text: `Synthesize the backlog into 2–5 roadmap themes.
 
 Full backlog:
 ${fullBacklog.map((i) => `  [${i.id}] ${i.title} — ${i.priority} ${i.type}, complexity ${i.complexity}`).join("\n")}
 
-Group them into 2–5 themes that tell a coherent product story.
-Each theme should have a name, a 1–2 sentence description, and list the item IDs that belong to it.
+Output a JSON object with a themes array. Each theme has name, description, and items (array of backlog IDs).
 
-Output ONLY a JSON object, no text before or after, no markdown fences:
-
-{
-  "themes": [
-    {
-      "name": "Authentication & Security",
-      "description": "Harden auth flows, fix credential handling, add token refresh.",
-      "items": ["feat-auth-refresh-tokens", "feat-secure-headers"]
-    }
-  ]
-}`,
+{"themes":[{"name":"...","description":"...","items":["id1","id2"]}]}`,
     }],
   })
 
-  const themes = parseThemes(roadmapResult.text)
+  let themes = parseThemes(themesStep1.text)
+  if (themes.length === 0) {
+    const themesStep2 = await promptAndWait(oc, {
+      sessionID,
+      parts: [{ type: "text", text: `Output ONLY the JSON object with the themes array, nothing else.` }],
+    })
+    themes = parseThemes(themesStep2.text)
+  }
 
   // ── Step 4: Write ROADMAP.md to the repo ─────────────────────────────────
   const roadmapMd = buildRoadmapMarkdown(fullBacklog, themes, repo)
