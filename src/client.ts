@@ -93,6 +93,12 @@ async function probeServer(baseUrl: string): Promise<boolean> {
   }
 }
 
+// Candidate ports to probe before spawning a fresh server.
+//  - 4096: opencode TUI default
+//  - 4097: Astrophage's own default spawn port — may still be live from a
+//    previous run when the parent crashed without closing it. Reuse over spawn.
+const PROBE_PORTS = [4096, 4097]
+
 export async function getClient(): Promise<OpencodeClient> {
   if (_client) return _client
 
@@ -105,23 +111,42 @@ export async function getClient(): Promise<OpencodeClient> {
     return _client
   }
 
-  // 2. TUI default port — probe with an actual session create/delete
-  const tuiURL = "http://127.0.0.1:4096"
-  if (await probeServer(tuiURL)) {
-    console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${tuiURL}`)
-    _client = createOpencodeClient({ baseUrl: tuiURL, directory: DIR })
-    startEventLoop(_client)
-    return _client
+  // 2. Probe every candidate port for a live, working OpenCode server.
+  //    Only loopback binds count — if the TUI is bound to a non-loopback IP
+  //    (e.g. Tailscale only), probeServer will correctly fail here.
+  for (const port of PROBE_PORTS) {
+    const url = `http://127.0.0.1:${port}`
+    if (await probeServer(url)) {
+      console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${url}`)
+      _client = createOpencodeClient({ baseUrl: url, directory: DIR })
+      startEventLoop(_client)
+      return _client
+    }
   }
 
-  // 3. Spawn a dedicated server (TUI not available)
-  console.log(`[ASTROPHAGE] No existing server found — spawning on port 4097...`)
-  const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 4097 })
-  _serverClose = server.close
-  console.log(`[ASTROPHAGE] OpenCode server ready at ${server.url}`)
-  _client = createOpencodeClient({ baseUrl: server.url, directory: DIR })
-  startEventLoop(_client)
-  return _client
+  // 3. Spawn a dedicated server. Try 4097 first for discoverability, then fall
+  //    back to an ephemeral port if it's already bound (stale process, other
+  //    service, etc.) so we don't wedge the autonomous loop.
+  const spawnPorts = [4097, 0] // 0 = OS-assigned ephemeral
+  let lastErr: unknown = null
+  for (const port of spawnPorts) {
+    try {
+      console.log(`[ASTROPHAGE] No existing server found — spawning on ${port === 0 ? "ephemeral port" : `port ${port}`}...`)
+      const server = await createOpencodeServer({ hostname: "127.0.0.1", port })
+      _serverClose = server.close
+      console.log(`[ASTROPHAGE] OpenCode server ready at ${server.url}`)
+      _client = createOpencodeClient({ baseUrl: server.url, directory: DIR })
+      startEventLoop(_client)
+      return _client
+    } catch (err) {
+      lastErr = err
+      const msg = String(err)
+      // If the port collides, try the next candidate; otherwise bail immediately.
+      if (!/EADDRINUSE|Failed to start server|address already in use/i.test(msg)) break
+      console.warn(`[ASTROPHAGE] Spawn on port ${port} failed (${msg.split("\n")[0]}); trying next...`)
+    }
+  }
+  throw new Error(`[ASTROPHAGE] Could not acquire an OpenCode server: ${String(lastErr)}`)
 }
 
 export function closeServer() {
