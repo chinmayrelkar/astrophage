@@ -23,11 +23,21 @@ import { roundStart, emit, transcript } from "./transcript.js"
 import { startRun, finishRun, setCurrentTask } from "./server.js"
 import { closeServer } from "./client.js"
 import { startSpan, endSpan } from "./trace.js"
-import { clearTokenStats } from "./token-tracker.js"
+import { clearTokenStats, getTokenStats } from "./token-tracker.js"
 import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
 
 // Fallback cap — PM plan.maxRounds always takes precedence when available
 const DEFAULT_MAX_ROUNDS = 3
+
+/** Return the most-recently-completed TurnStats for a given agent+round pair. */
+function latestTurnStats(agent: string, round: number) {
+  const all = getTokenStats()
+  // Scan in reverse so we always get the last completed turn for this agent/round
+  for (let i = all.length - 1; i >= 0; i--) {
+    if (all[i]!.agent === agent && all[i]!.round === round) return all[i]
+  }
+  return undefined
+}
 
 let _running = false
 
@@ -118,12 +128,12 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       if (round === 1) {
         // First round: explore, fix, open PR — with PM focus areas injected
         pr = await proposeAndOpenPR(task, round, coderCtx)
-        endSpan(runId, coderSpanId)
+        endSpan(runId, coderSpanId, latestTurnStats("coder", round))
         console.log(`\n[PIPELINE] PR opened: ${pr.url}`)
       } else {
         // Subsequent rounds: read review comments, update, force-push
         await iterateOnPRFeedback(task, pr!, round)
-        endSpan(runId, coderSpanId)
+        endSpan(runId, coderSpanId, latestTurnStats("coder", round))
       }
 
       // ── Tester ────────────────────────────────────────────────────────────
@@ -132,7 +142,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         `Run tests for PR #${pr!.number}`, rootSpanId,
       )
       const testResult = await runTests(pr!, task.repo, round, testerCtx)
-      endSpan(runId, testerSpanId)
+      endSpan(runId, testerSpanId, latestTurnStats("tester", round))
 
       if (!testResult.passed) {
         const failSummary = testResult.failures.slice(0, 3).join("; ") || "see output"
@@ -162,7 +172,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         `Review PR #${pr!.number}`, rootSpanId,
       )
       const verdict = await reviewPR(pr!, task.repo, round, reviewerCtx)
-      endSpan(runId, reviewerSpanId)
+      endSpan(runId, reviewerSpanId, latestTurnStats("reviewer", round))
 
       rounds.push({
         number: round,

@@ -2,7 +2,7 @@ import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { AgentName } from "./types.js"
 import { emit } from "./transcript.js"
-import { startTurn, endTurn, recordDelta } from "./token-tracker.js"
+import { startTurn, endTurn, recordDelta, type TurnStats } from "./token-tracker.js"
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
@@ -139,6 +139,7 @@ export interface PromptParams {
 export interface PromptResult {
   text: string
   structured: unknown
+  turnStats: TurnStats | null
 }
 
 export async function promptAndWait(
@@ -151,7 +152,7 @@ export async function promptAndWait(
       noReply: true,
       parts: params.parts,
     })
-    return { text: "", structured: null }
+    return { text: "", structured: null, turnStats: null }
   }
 
   // Start tracking this turn
@@ -202,16 +203,15 @@ export async function promptAndWait(
           .join("")
         const structured = (last.info as Record<string, unknown>)["structured"] ?? null
 
-        // End turn tracking
-        endTurn(params.sessionID, inputText)
+        // End turn tracking — capture stats to wire into trace spans
+        const turnStats = endTurn(params.sessionID, inputText)
 
-        return { text: textParts, structured }
+        return { text: textParts, structured, turnStats }
       }
     }
   }
 
   process.stdout.write("]\n")
-  // End turn tracking even on timeout
   endTurn(params.sessionID, inputText)
   throw new Error(`[ASTROPHAGE] Timeout waiting for model response after ${TIMEOUT_MS}ms`)
 }
