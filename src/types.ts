@@ -57,17 +57,6 @@ export interface Task {
   description: string
   /** The repo this task operates on */
   repo: RepoContext
-  /** Pre-identified bug location (Iteration 0: hardcoded seed) */
-  bugSeed?: BugSeed
-}
-
-export interface BugSeed {
-  file: string        // relative to bawarchi repo root
-  startLine: number
-  endLine: number
-  description: string
-  /** The exact buggy code snippet */
-  buggyCode: string
 }
 
 // ─── Spec produced by PM + Architect ─────────────────────────────────────────

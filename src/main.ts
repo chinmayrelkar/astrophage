@@ -17,7 +17,7 @@ import { reviewPatch, closeReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
 import { closeServer } from "./client.js"
 import { TASKS, listTasks } from "../demo/index.js"
-import type { Task, PipelineResult } from "./types.js"
+import type { Task, Patch, PipelineResult } from "./types.js"
 
 // ─── CLI argument parsing ─────────────────────────────────────────────────────
 
@@ -46,10 +46,8 @@ async function runIteration0(task: Task): Promise<PipelineResult> {
   const round = 1
   roundStart(round)
 
-  if (!task.bugSeed) throw new Error("No bug seed for Iteration 0")
-
-  // Step 1: Coder proposes fix
-  const patch = await proposeInitialFix(task.bugSeed, task.repo, round)
+  // Step 1: Coder explores repo and proposes fix
+  const patch: Patch = await proposeInitialFix(task, round)
 
   // Step 2: Reviewer evaluates
   const verdict = await reviewPatch(patch, task.repo, round)
