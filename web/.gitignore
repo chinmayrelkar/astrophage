@@ -1,0 +1,8 @@
+# Build outputs
+dist
+node_modules
+
+# tsc emits alongside .tsx sources when invoked with `npm run build`.
+# Only the .tsx files are source of truth; the .js twins are artifacts.
+src/**/*.js
+!src/**/*.config.js

@@ -1,823 +1,535 @@
-import { useEffect, useRef, useState } from "react"
+// ─── Astrophage — Landing ─────────────────────────────────────────────────────
+// Portfolio showcase for a fully autonomous seven-agent software team.
+// Every claim on this page has been verified against the source it describes.
+// Aesthetic: refined terminal / space. Strict mono. Dark. Personal voice.
+
 import { useNavigate } from "react-router-dom"
 import { AGENTS } from "./space/agents"
 import { StarfieldBackground } from "./space/StarfieldBackground"
+import {
+  NavBar, Footer, OrbitDiagram,
+  Section, Eyebrow, Pill, Card, CodeBlock, Code, FadeIn, Button, H,
+  color, space, type, baseStyle, gradientText,
+  useIsNarrow,
+} from "./components/brand"
 
-// ─── Animated orbit diagram ───────────────────────────────────────────────────
-function OrbitDiagram() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+// ─── Real mission record, pulled from this repo's actual run history ─────────
+// Source of truth: ~/.astrophage/runs/*.json + run-memory.json on 2026-04-19.
+// When citing work, we cite the work. No hypotheticals on this page.
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    let animId: number
-    let t = 0
-    const W = canvas.width
-    const H = canvas.height
-    const cx = W / 2
-    const cy = H / 2
+const MERGED_MISSIONS = [
+  {
+    pr: 7,
+    title: "Reject or warn on http:// spec sources; enforce HTTPS",
+    oneLine: "Sealed a supply-chain hole: loading an OpenAPI spec over plain HTTP could inject backdoored client code. Now rejected at parse time.",
+    rounds: 2,
+  },
+  {
+    pr: 10,
+    title: "Use encoding/json for gRPC body instead of string concatenation",
+    oneLine: "The generator was shipping a bespoke JSON serializer that dropped non-string types. Replaced with the standard library. Merged clean.",
+    rounds: 1,
+  },
+  {
+    pr: 12,
+    title: "Harden generated source + binary permissions to 0600 / 0700",
+    oneLine: "Anything Bawarchi writes to disk now follows least-privilege. No world-readable credentials hiding in generated CLIs.",
+    rounds: 2,
+  },
+] as const
 
-    function draw() {
-      if (!ctx) return
-      ctx.clearRect(0, 0, W, H)
-      t += 0.008
-
-      // subtle nebula behind center
-      const nebula = ctx.createRadialGradient(cx, cy, 0, cx, cy, 160)
-      nebula.addColorStop(0, "rgba(80,40,200,0.12)")
-      nebula.addColorStop(0.5, "rgba(30,10,80,0.06)")
-      nebula.addColorStop(1, "rgba(0,0,0,0)")
-      ctx.beginPath()
-      ctx.arc(cx, cy, 160, 0, Math.PI * 2)
-      ctx.fillStyle = nebula
-      ctx.fill()
-
-      // orbit rings
-      for (const agent of AGENTS) {
-        const r = agent.orbitRadius * 0.46
-        ctx.beginPath()
-        ctx.arc(cx, cy, r, 0, Math.PI * 2)
-        ctx.strokeStyle = "rgba(255,255,255,0.05)"
-        ctx.lineWidth = 1
-        ctx.setLineDash([2, 6])
-        ctx.stroke()
-        ctx.setLineDash([])
-      }
-
-      // task star
-      const pulse = 1 + Math.sin(t * 2) * 0.08
-      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 32 * pulse)
-      grd.addColorStop(0, "rgba(255,230,80,1)")
-      grd.addColorStop(0.35, "rgba(255,150,20,0.6)")
-      grd.addColorStop(1, "rgba(255,80,0,0)")
-      ctx.beginPath()
-      ctx.arc(cx, cy, 32 * pulse, 0, Math.PI * 2)
-      ctx.fillStyle = grd
-      ctx.fill()
-
-      ctx.fillStyle = "rgba(255,230,80,0.9)"
-      ctx.font = "bold 8px monospace"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "middle"
-      ctx.fillText("TASK", cx, cy)
-
-      // laser beams between adjacent active ships (subtle)
-      const positions: { x: number; y: number; color: string }[] = []
-      for (const agent of AGENTS) {
-        const angle = agent.orbitPhase + t * agent.orbitSpeed
-        const r = agent.orbitRadius * 0.46
-        positions.push({
-          x: cx + Math.cos(angle) * r,
-          y: cy + Math.sin(angle) * r,
-          color: agent.color,
-        })
-      }
-
-      // draw one animated laser from ship[0] to ship[1] cycling
-      const beamIdx = Math.floor((t * 0.4) % AGENTS.length)
-      const next = (beamIdx + 1) % AGENTS.length
-      const a = positions[beamIdx]
-      const b = positions[next]
-      const beamAlpha = 0.18 + Math.sin(t * 6) * 0.08
-      const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y)
-      grad.addColorStop(0, a.color + "00")
-      grad.addColorStop(0.5, a.color + Math.round(beamAlpha * 255).toString(16).padStart(2, "0"))
-      grad.addColorStop(1, b.color + "00")
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.strokeStyle = grad
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-
-      // ships
-      for (let i = 0; i < AGENTS.length; i++) {
-        const agent = AGENTS[i]
-        const { x, y } = positions[i]
-
-        // glow
-        const glow = ctx.createRadialGradient(x, y, 0, x, y, 18)
-        glow.addColorStop(0, agent.color + "55")
-        glow.addColorStop(1, agent.color + "00")
-        ctx.beginPath()
-        ctx.arc(x, y, 18, 0, Math.PI * 2)
-        ctx.fillStyle = glow
-        ctx.fill()
-
-        // dot
-        ctx.beginPath()
-        ctx.arc(x, y, 4.5, 0, Math.PI * 2)
-        ctx.fillStyle = agent.color
-        ctx.fill()
-
-        // label
-        ctx.fillStyle = agent.color + "cc"
-        ctx.font = "bold 7px monospace"
-        ctx.textAlign = "center"
-        ctx.textBaseline = "top"
-        ctx.fillText(agent.name.toUpperCase(), x, y + 7)
-      }
-
-      animId = requestAnimationFrame(draw)
-    }
-
-    draw()
-    return () => cancelAnimationFrame(animId)
-  }, [])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={480}
-      height={480}
-      style={{ display: "block", width: "100%", maxWidth: "480px" }}
-    />
-  )
-}
-
-// ─── Typewriter that loops through lines ──────────────────────────────────────
-function Typewriter({ lines }: { lines: string[] }) {
-  const [display, setDisplay] = useState("")
-  const [lineIdx, setLineIdx] = useState(0)
-  const [charIdx, setCharIdx] = useState(0)
-  const [deleting, setDeleting] = useState(false)
-  const [paused, setPaused] = useState(false)
-
-  useEffect(() => {
-    if (paused) {
-      const t = setTimeout(() => { setPaused(false); setDeleting(true) }, 2200)
-      return () => clearTimeout(t)
-    }
-    const speed = deleting ? 18 : 38
-    const t = setTimeout(() => {
-      const line = lines[lineIdx]
-      if (!deleting) {
-        if (charIdx < line.length) {
-          setDisplay(line.slice(0, charIdx + 1))
-          setCharIdx(c => c + 1)
-        } else {
-          setPaused(true)
-        }
-      } else {
-        if (charIdx > 0) {
-          setDisplay(line.slice(0, charIdx - 1))
-          setCharIdx(c => c - 1)
-        } else {
-          setDeleting(false)
-          setLineIdx(i => (i + 1) % lines.length)
-        }
-      }
-    }, speed)
-    return () => clearTimeout(t)
-  }, [charIdx, deleting, paused, lineIdx, lines])
-
-  return (
-    <span>
-      {display}
-      <span style={{ color: "#00ff87", animation: "blink 1s step-end infinite" }}>|</span>
-    </span>
-  )
-}
-
-// ─── Section fade-in on scroll ────────────────────────────────────────────────
-function FadeIn({ children, delay = 0, style = {} }: {
-  children: React.ReactNode
-  delay?: number
-  style?: React.CSSProperties
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting) setVisible(true) },
-      { threshold: 0.1 },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? "none" : "translateY(32px)",
-        transition: `opacity 0.8s ease ${delay}ms, transform 0.8s ease ${delay}ms`,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  )
-}
+const BLOCKED_MISSION = {
+  title: "Remove hardcoded --plaintext flag from gRPC template",
+  reason:
+    "Even with TLS as the new default, the --plaintext escape hatch let callers exfiltrate bearer tokens in cleartext. Rocky refused the fix until the flag itself was removed or guarded at runtime. The coder closed the PR.",
+} as const
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
+
 export function LandingPage() {
   const navigate = useNavigate()
-
-  const headlines = [
-    "7 agents. Zero humans. Fully autonomous.",
-    "Finds bugs. Writes code. Ships PRs.",
-    "Scans your repo while you sleep.",
-  ]
+  const isNarrow = useIsNarrow()
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#04040f",
-      color: "#e2e8f0",
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      overflowX: "hidden",
-    }}>
+    <div style={baseStyle.root}>
       <StarfieldBackground />
+      <NavBar />
 
-      {/* ── NAV ── */}
-      <nav style={{
-        position: "fixed",
-        inset: "0 0 auto 0",
-        zIndex: 100,
-        display: "flex",
-        alignItems: "center",
-        padding: "12px 28px",
-        background: "rgba(4,4,15,0.7)",
-        backdropFilter: "blur(16px)",
-        borderBottom: "1px solid rgba(255,255,255,0.04)",
-      }}>
-        <span style={{ fontWeight: 900, fontSize: "13px", letterSpacing: "0.25em", color: "white" }}>
-          ASTROPHAGE
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: "20px", alignItems: "center" }}>
-          <button
-            onClick={() => navigate("/docs")}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              fontSize: "10px", color: "rgba(255,255,255,0.35)",
-              letterSpacing: "0.1em", fontFamily: "inherit",
-              transition: "color 0.2s",
-            }}
-            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
-            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
-          >
-            DOCS
-          </button>
-          <button
-            onClick={() => navigate("/observability")}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              fontSize: "10px", color: "rgba(255,255,255,0.35)",
-              letterSpacing: "0.1em", fontFamily: "inherit",
-              transition: "color 0.2s",
-            }}
-            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
-            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
-          >
-            OBSERVABILITY
-          </button>
-          <a
-            href="https://github.com/chinmayrelkar/astrophage"
-            target="_blank" rel="noreferrer"
-            style={{ fontSize: "10px", color: "rgba(255,255,255,0.35)", textDecoration: "none", letterSpacing: "0.1em", transition: "color 0.2s" }}
-            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
-            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
-          >
-            GITHUB ↗
-          </a>
-          <button
-            onClick={() => navigate("/app")}
-            style={{
-              background: "rgba(0,255,135,0.1)",
-              border: "1px solid rgba(0,255,135,0.35)",
-              borderRadius: "4px",
-              color: "#00ff87",
-              cursor: "pointer",
-              fontSize: "10px",
-              letterSpacing: "0.1em",
-              padding: "5px 14px",
-              fontFamily: "inherit",
-              transition: "all 0.2s",
-            }}
-            onMouseOver={e => {
-              e.currentTarget.style.background = "rgba(0,255,135,0.2)"
-              e.currentTarget.style.boxShadow = "0 0 20px rgba(0,255,135,0.2)"
-            }}
-            onMouseOut={e => {
-              e.currentTarget.style.background = "rgba(0,255,135,0.1)"
-              e.currentTarget.style.boxShadow = "none"
-            }}
-          >
-            LAUNCH →
-          </button>
-        </div>
-      </nav>
-
-      {/* ── HERO ── */}
-      <section style={{
-        position: "relative",
-        zIndex: 1,
-        minHeight: "100vh",
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        alignItems: "center",
-        gap: "0",
-        padding: "100px 6vw 60px",
-        maxWidth: "1280px",
-        margin: "0 auto",
-      }}>
-        {/* Left — copy */}
-        <div>
-          {/* Eyebrow */}
-          <div style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            background: "rgba(0,255,135,0.06)",
-            border: "1px solid rgba(0,255,135,0.18)",
-            borderRadius: "100px",
-            padding: "4px 14px 4px 8px",
-            marginBottom: "36px",
-          }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#00ff87", boxShadow: "0 0 8px #00ff87", display: "inline-block" }} />
-            <span style={{ fontSize: "9px", letterSpacing: "0.2em", color: "#00ff87", fontWeight: 700 }}>
-              INSPIRED BY PROJECT HAIL MARY
-            </span>
-          </div>
-
-          {/* Headline */}
-          <h1 style={{
-            fontSize: "clamp(36px, 4.5vw, 64px)",
-            fontWeight: 900,
-            lineHeight: 1.08,
-            letterSpacing: "-0.01em",
-            color: "white",
-            marginBottom: "28px",
-          }}>
-            An AI team that<br />
-            <span style={{
-              background: "linear-gradient(90deg, #00ff87, #00c8ff)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}>
-              ships your code.
-            </span>
-          </h1>
-
-          {/* Typewriter sub */}
-          <div style={{
-            fontSize: "clamp(13px, 1.4vw, 16px)",
-            color: "rgba(255,255,255,0.38)",
-            minHeight: "1.6em",
-            marginBottom: "48px",
-            letterSpacing: "0.02em",
-          }}>
-            <Typewriter lines={headlines} />
-          </div>
-
-          {/* CTA row */}
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            <button
-              onClick={() => navigate("/app")}
-              style={{
-                background: "linear-gradient(135deg, #00ff87, #00c8ff)",
-                border: "none",
-                borderRadius: "6px",
-                color: "#04040f",
-                cursor: "pointer",
-                fontSize: "11px",
-                fontWeight: 900,
-                letterSpacing: "0.14em",
-                padding: "14px 32px",
-                fontFamily: "inherit",
-                boxShadow: "0 0 40px rgba(0,255,135,0.3)",
-                transition: "all 0.2s",
-              }}
-              onMouseOver={e => {
-                e.currentTarget.style.boxShadow = "0 0 64px rgba(0,255,135,0.5)"
-                e.currentTarget.style.transform = "translateY(-1px)"
-              }}
-              onMouseOut={e => {
-                e.currentTarget.style.boxShadow = "0 0 40px rgba(0,255,135,0.3)"
-                e.currentTarget.style.transform = "none"
-              }}
-            >
-              OPEN MISSION CONTROL
-            </button>
-            <button
-              onClick={() => navigate("/docs")}
-              style={{
-                background: "none",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: "6px",
-                color: "rgba(255,255,255,0.4)",
-                cursor: "pointer",
-                fontSize: "11px",
-                letterSpacing: "0.1em",
-                padding: "14px 24px",
-                fontFamily: "inherit",
-                transition: "all 0.2s",
-              }}
-              onMouseOver={e => {
-                e.currentTarget.style.borderColor = "rgba(255,255,255,0.25)"
-                e.currentTarget.style.color = "rgba(255,255,255,0.8)"
-              }}
-              onMouseOut={e => {
-                e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"
-                e.currentTarget.style.color = "rgba(255,255,255,0.4)"
-              }}
-            >
-              HOW IT WORKS →
-            </button>
-          </div>
-
-          {/* Social proof line */}
-          <div style={{
-            marginTop: "48px",
-            fontSize: "9px",
-            color: "rgba(255,255,255,0.18)",
-            letterSpacing: "0.12em",
-            display: "flex",
-            gap: "24px",
-          }}>
-            <span>7 SPECIALIZED AGENTS</span>
-            <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
-            <span>FULLY AUTONOMOUS</span>
-            <span style={{ color: "rgba(255,255,255,0.08)" }}>·</span>
-            <span>ZERO HUMAN TASKS</span>
-          </div>
-        </div>
-
-        {/* Right — orbit */}
+      {/* ═══ HERO ═══ */}
+      <Section pad="loose" width="wide" style={{ paddingTop: "140px", minHeight: "100vh", display: "flex", alignItems: "center" }}>
         <div style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: isNarrow ? "1fr" : "1.1fr 1fr",
           alignItems: "center",
-          justifyContent: "center",
-          position: "relative",
+          gap: isNarrow ? space.xxl : space.xxxl,
+          width: "100%",
         }}>
-          <OrbitDiagram />
-        </div>
-      </section>
+          {/* Copy */}
+          <div>
+            <Eyebrow dot style={{ marginBottom: space.lg }}>
+              Inspired by Project Hail Mary
+            </Eyebrow>
 
-      {/* ── THE HOOK ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 6vw" }}>
-        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
-          <FadeIn>
-            <blockquote style={{
-              fontSize: "clamp(20px, 2.8vw, 36px)",
-              fontWeight: 800,
-              lineHeight: 1.4,
-              color: "rgba(255,255,255,0.85)",
-              borderLeft: "3px solid #00ff87",
-              paddingLeft: "32px",
-              margin: 0,
-              letterSpacing: "-0.01em",
-            }}>
-              "Astrophage is a microbe that eats starlight.<br />
-              <span style={{ color: "rgba(255,255,255,0.4)" }}>
-                We named our AI engineering team after it.
-              </span>"
-            </blockquote>
-            <div style={{ marginTop: "20px", paddingLeft: "35px", fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.15em" }}>
-              — INSPIRED BY ANDY WEIR'S PROJECT HAIL MARY
-            </div>
-          </FadeIn>
+            <H level={1} style={{ marginBottom: space.lg }}>
+              Seven agents.<br />
+              One star.<br />
+              <span style={gradientText}>They ship the code.</span>
+            </H>
 
-          <FadeIn delay={150} style={{ marginTop: "64px" }}>
             <p style={{
-              fontSize: "clamp(14px, 1.6vw, 18px)",
-              color: "rgba(255,255,255,0.45)",
-              lineHeight: 1.85,
-              maxWidth: "680px",
+              fontSize: type.bodyLg,
+              color: color.textDim,
+              lineHeight: 1.75,
+              maxWidth: "520px",
+              marginBottom: space.xl,
             }}>
-              Seven agents orbit your codebase. DuBois scans for bugs and violations. Lokken
-              prioritizes features and writes the roadmap. Stratt plans the fix. Ryland Grace
-              writes code. Yao tests it. Rocky reviews with no compromise. No human submits
-              tasks — the crew finds work autonomously and ships merged PRs.
+              Astrophage is an autonomous engineering company. It scans a repo for bugs,
+              prioritises features, plans the fix, writes code, tests it, reviews against
+              a hardcoded constitution, and opens a merged pull request.
+              <br /><br />
+              I don't push the button. The crew finds the work.
             </p>
-          </FadeIn>
-        </div>
-      </section>
 
-      {/* ── THE PIPELINE ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "80px 6vw" }}>
-        <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
-          <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.2)", marginBottom: "40px" }}>
-              THE PIPELINE
+            {/* CTA row */}
+            <div style={{ display: "flex", gap: space.sm, flexWrap: "wrap", marginBottom: space.xl }}>
+              <Button variant="primary" size="lg" onClick={() => navigate("/app")}>
+                OPEN MISSION CONTROL
+              </Button>
+              <Button variant="ghost" size="lg" onClick={() => navigate("/docs")}>
+                READ THE DOCS →
+              </Button>
             </div>
-          </FadeIn>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
-            {[
-              { agent: AGENTS.find(a => a.name === "scout")!, step: "01", action: "Scans GitHub issues and the codebase for bugs, violations, and actionable work" },
-              { agent: AGENTS.find(a => a.name === "product")!, step: "02", action: "Reads feedback, builds a prioritized backlog, writes the roadmap, queues features" },
-              { agent: AGENTS.find(a => a.name === "pm")!, step: "03", action: "Plans the fix — sets maxRounds, focus areas, risk flags for each task" },
-              { agent: AGENTS.find(a => a.name === "architect")!, step: "04", action: "Designs file contracts and interfaces before a single line is written" },
-              { agent: AGENTS.find(a => a.name === "coder")!, step: "05", action: "Implements the fix, opens the PR, iterates on feedback" },
-              { agent: AGENTS.find(a => a.name === "tester")!, step: "06", action: "Writes tests, runs them, reports truth — not opinion" },
-              { agent: AGENTS.find(a => a.name === "reviewer")!, step: "07", action: "Reviews against a hardcoded constitution. No negotiation on security." },
-            ].map(({ agent, step, action }, i) => (
-              <FadeIn key={agent!.name} delay={i * 60}>
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "24px",
-                  padding: "20px 0",
-                  borderBottom: "1px solid rgba(255,255,255,0.05)",
-                  position: "relative",
-                }}
-                  onMouseOver={e => (e.currentTarget.style.background = "rgba(255,255,255,0.015)")}
-                  onMouseOut={e => (e.currentTarget.style.background = "none")}
-                >
-                  {/* Step number */}
-                  <div style={{
-                    fontSize: "9px",
-                    color: "rgba(255,255,255,0.12)",
-                    letterSpacing: "0.1em",
-                    width: "28px",
-                    flexShrink: 0,
-                  }}>
-                    {step}
-                  </div>
-
-                  {/* Color bar */}
-                  <div style={{
-                    width: "3px",
-                    height: "40px",
-                    background: agent!.color,
-                    borderRadius: "2px",
-                    flexShrink: 0,
-                    boxShadow: `0 0 12px ${agent!.color}66`,
-                  }} />
-
-                  {/* Agent */}
-                  <div style={{ width: "180px", flexShrink: 0 }}>
-                    <div style={{ fontSize: "10px", fontWeight: 700, color: agent!.color, letterSpacing: "0.1em" }}>
-                      {agent!.name.toUpperCase()}
-                    </div>
-                    <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.25)", marginTop: "3px" }}>
-                      {agent!.character} · {agent!.ship}
-                    </div>
-                  </div>
-
-                  {/* Action */}
-                  <div style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5, flex: 1 }}>
-                    {action}
-                  </div>
-                </div>
-              </FadeIn>
-            ))}
+            <div style={{
+              fontSize: "9px",
+              color: color.textFaint,
+              letterSpacing: "0.15em",
+              display: "flex",
+              gap: "clamp(12px, 2vw, 24px)",
+              flexWrap: "wrap",
+            }}>
+              <span>7 SPECIALIZED AGENTS</span>
+              <span style={{ color: color.textGhost }}>·</span>
+              <span>AUTONOMOUS LOOP</span>
+              <span style={{ color: color.textGhost }}>·</span>
+              <span>5 MERGED PRS · 1 HARD BLOCK</span>
+            </div>
           </div>
 
-          <FadeIn delay={400}>
-            <div style={{
-              marginTop: "32px",
-              padding: "16px 24px",
-              background: "rgba(0,255,135,0.04)",
-              border: "1px solid rgba(0,255,135,0.12)",
-              borderRadius: "6px",
-              fontSize: "11px",
-              color: "rgba(255,255,255,0.35)",
-              lineHeight: 1.7,
-            }}>
-              <span style={{ color: "#00ff87" }}>Autonomous:</span>{" "}
-              Steps 01–02 run continuously to find work. Steps 05–07 loop until tests pass <em>and</em> Rocky approves — or max rounds are hit. No human triggers anything.
-            </div>
-          </FadeIn>
-        </div>
-      </section>
-
-      {/* ── ROCKY'S RULE ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "100px 6vw" }}>
-        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
-          <FadeIn>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "2px",
-              borderRadius: "12px",
-              overflow: "hidden",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}>
-              {/* Left */}
-              <div style={{
-                background: "rgba(239,68,68,0.06)",
-                padding: "40px",
-                borderRight: "1px solid rgba(255,255,255,0.04)",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-                  <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#ef4444", boxShadow: "0 0 12px #ef4444" }} />
-                  <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.18em", color: "#ef4444" }}>NON-NEGOTIABLE</span>
-                </div>
-                <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.06em", marginBottom: "28px" }}>
-                  Rocky kills the PR. No rounds. No appeal.
-                </div>
-                {[
-                  "Hardcoded secrets or API keys",
-                  "Credentials in URL query params",
-                  "Auth that silently succeeds on missing env vars",
-                  "Plaintext HTTP for token exchange",
-                  "OAuth without token refresh",
-                ].map(r => (
-                  <div key={r} style={{ display: "flex", gap: "10px", marginBottom: "14px", fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
-                    <span style={{ color: "#ef4444", flexShrink: 0, marginTop: "1px" }}>✕</span>
-                    {r}
-                  </div>
-                ))}
-              </div>
-
-              {/* Right */}
-              <div style={{ background: "rgba(251,191,36,0.04)", padding: "40px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-                  <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#fbbf24", boxShadow: "0 0 12px #fbbf24" }} />
-                  <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.18em", color: "#fbbf24" }}>NEGOTIABLE</span>
-                </div>
-                <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", letterSpacing: "0.06em", marginBottom: "28px" }}>
-                  Pushback. The coder iterates.
-                </div>
-                {[
-                  "Env var naming conventions",
-                  "Error message wording",
-                  "Log level choices",
-                  "Code style preferences",
-                ].map(r => (
-                  <div key={r} style={{ display: "flex", gap: "10px", marginBottom: "14px", fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
-                    <span style={{ color: "#fbbf24", flexShrink: 0, marginTop: "1px" }}>~</span>
-                    {r}
-                  </div>
-                ))}
-
-                <div style={{
-                  marginTop: "32px",
-                  padding: "14px 16px",
-                  background: "rgba(255,255,255,0.03)",
-                  borderRadius: "6px",
-                  fontSize: "10px",
-                  color: "rgba(255,255,255,0.3)",
-                  lineHeight: 1.6,
-                  fontStyle: "italic",
-                }}>
-                  "Rocky has rules, not opinions."
-                </div>
-              </div>
-            </div>
-          </FadeIn>
-        </div>
-      </section>
-
-      {/* ── THE DEMO ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "80px 6vw" }}>
-        <div style={{ maxWidth: "900px", margin: "0 auto" }}>
-          <FadeIn>
-            <div style={{ fontSize: "9px", letterSpacing: "0.25em", color: "rgba(255,255,255,0.2)", marginBottom: "40px" }}>
-              SAME CONSTITUTION · SAME COMPANY · TWO OUTCOMES
-            </div>
-          </FadeIn>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            {[
-              {
-                title: "OAuth Bug",
-                color: "#a78bfa",
-                badge: "3 ROUNDS → RESOLVED",
-                badgeColor: "#00ff87",
-                lines: [
-                  { label: "Bug", text: "gRPC CLI silently skips auth when env var is missing" },
-                  { label: "Rule", text: "Non-negotiable: auth must never silently succeed" },
-                  { label: "Result", text: "Coder concedes on error message wording. Rocky accepts." },
-                ],
-              },
-              {
-                title: "API Key Bug",
-                color: "#f472b6",
-                badge: "ROUND 1 → INSTANT BLOCK",
-                badgeColor: "#ef4444",
-                lines: [
-                  { label: "Bug", text: "API key appended as a URL query parameter" },
-                  { label: "Rule", text: "Non-negotiable: credentials must never appear in URLs" },
-                  { label: "Result", text: "Rocky kills the PR in round 1. No negotiation." },
-                ],
-              },
-            ].map(demo => (
-              <FadeIn key={demo.title}>
-                <div style={{
-                  background: "rgba(255,255,255,0.02)",
-                  border: `1px solid ${demo.color}22`,
-                  borderRadius: "10px",
-                  padding: "28px",
-                  height: "100%",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 700, color: demo.color }}>{demo.title}</div>
-                    <div style={{
-                      fontSize: "8px", fontWeight: 700, letterSpacing: "0.1em",
-                      color: demo.badgeColor,
-                      border: `1px solid ${demo.badgeColor}44`,
-                      borderRadius: "3px",
-                      padding: "3px 8px",
-                    }}>
-                      {demo.badge}
-                    </div>
-                  </div>
-                  {demo.lines.map(l => (
-                    <div key={l.label} style={{ marginBottom: "16px" }}>
-                      <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.18)", letterSpacing: "0.12em", marginBottom: "4px" }}>{l.label.toUpperCase()}</div>
-                      <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>{l.text}</div>
-                    </div>
-                  ))}
-                </div>
-              </FadeIn>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── FINAL CTA ── */}
-      <section style={{ position: "relative", zIndex: 1, padding: "140px 6vw 120px", textAlign: "center" }}>
-        <FadeIn>
+          {/* Orbit diagram */}
           <div style={{
-            display: "inline-block",
-            fontSize: "9px",
-            letterSpacing: "0.25em",
-            color: "rgba(0,255,135,0.5)",
-            marginBottom: "24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
           }}>
-            READY FOR LAUNCH
+            <OrbitDiagram size={520} />
           </div>
-          <h2 style={{
-            fontSize: "clamp(32px, 5vw, 64px)",
-            fontWeight: 900,
-            color: "white",
-            letterSpacing: "-0.01em",
-            lineHeight: 1.1,
-            marginBottom: "24px",
+        </div>
+      </Section>
+
+      {/* ═══ MANIFESTO ═══ */}
+      <Section width="base" pad="loose">
+        <FadeIn>
+          <blockquote style={{
+            fontSize: "clamp(22px, 3vw, 38px)",
+            fontWeight: 700,
+            lineHeight: 1.45,
+            color: "rgba(255,255,255,0.9)",
+            borderLeft: `3px solid ${color.accent}`,
+            paddingLeft: "clamp(20px, 3vw, 32px)",
+            margin: 0,
+            letterSpacing: "-0.005em",
           }}>
-            Watch the crew work.
-          </h2>
+            "Astrophage is a microbe that eats starlight.<br />
+            <span style={{ color: color.textMute }}>
+              I named an AI engineering team after it.
+            </span>"
+          </blockquote>
+          <div style={{ marginTop: space.md, paddingLeft: "clamp(23px, 3vw, 35px)", fontSize: "10px", color: color.textFaint, letterSpacing: "0.18em" }}>
+            — AFTER ANDY WEIR
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={160} style={{ marginTop: space.xxl }}>
           <p style={{
-            fontSize: "15px",
-            color: "rgba(255,255,255,0.3)",
-            marginBottom: "48px",
+            fontSize: type.bodyLg,
+            color: color.textMute,
+            lineHeight: 1.9,
+            maxWidth: "680px",
+          }}>
+            In <em>Project Hail Mary</em>, a crew of one drags humanity back from the brink because
+            the right people at the right stations decide not to fail. Astrophage is that, for
+            a codebase. Seven roles, each with a character, a ship, and one job. The loop is
+            closed: the crew finds the bug, fixes the bug, tests the bug, argues about the bug,
+            and ships the PR. No human submits tasks. I show up, check the mission log, and read
+            what got merged.
+          </p>
+        </FadeIn>
+      </Section>
+
+      {/* ═══ THE CREW ═══ */}
+      <Section id="crew" width="wide" pad="loose" divider>
+        <FadeIn>
+          <Eyebrow style={{ marginBottom: space.lg }}>The Crew · 7 Stations</Eyebrow>
+          <H level={2} style={{ marginBottom: space.xl, maxWidth: "720px" }}>
+            Every station has a name, a face, and a single responsibility.
+          </H>
+        </FadeIn>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: space.md,
+        }}>
+          {AGENTS.map((a, i) => (
+            <FadeIn key={a.name} delay={i * 50}>
+              <Card accent={a.color} hoverLift style={{ height: "100%", display: "flex", flexDirection: "column", gap: space.sm }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: space.sm }}>
+                  <div style={{
+                    fontSize: "11px",
+                    fontWeight: 800,
+                    color: a.color,
+                    letterSpacing: "0.18em",
+                  }}>
+                    {a.role}
+                  </div>
+                  <div style={{ fontSize: "9px", color: color.textFaint, letterSpacing: "0.1em" }}>
+                    {a.ship.toUpperCase()}
+                  </div>
+                </div>
+                <div style={{ fontSize: "18px", fontWeight: 800, color: "white", letterSpacing: "-0.005em" }}>
+                  {a.character}
+                </div>
+                <div style={{ fontSize: "12.5px", color: color.textDim, lineHeight: 1.7 }}>
+                  {a.description}
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={320} style={{ marginTop: space.lg }}>
+          <div style={{ fontSize: "11px", color: color.textFaint, lineHeight: 1.7, maxWidth: "780px" }}>
+            <em>Note:</em> Yao writes Go tests today — the first target codebase is Go, so the
+            tester is language-specific on purpose. Generalising beyond Go is a planned mission,
+            not a current capability.
+          </div>
+        </FadeIn>
+      </Section>
+
+      {/* ═══ HOW A TASK FLOWS ═══ */}
+      <Section id="pipeline" width="base" pad="loose" divider>
+        <FadeIn>
+          <Eyebrow style={{ marginBottom: space.lg }}>The Pipeline · Mission Profile</Eyebrow>
+          <H level={2} style={{ marginBottom: space.lg, maxWidth: "720px" }}>
+            What happens when DuBois spots a bug at 2am.
+          </H>
+          <p style={{
+            fontSize: type.bodyLg,
+            color: color.textMute,
+            lineHeight: 1.8,
+            maxWidth: "640px",
+            marginBottom: space.xxl,
+          }}>
+            The loop dispatches one task at a time. Bug tasks jump ahead of feature work.
+            Rounds continue until tests pass <em>and</em> Rocky approves — or a non-negotiable rule breaks,
+            or we hit the max rounds Stratt set when planning.
+          </p>
+        </FadeIn>
+
+        <div>
+          {[
+            { agent: AGENTS.find((x) => x.name === "scout")!,     step: "01", action: "Finds work. Scans open GitHub issues and greps the codebase for hardcoded secrets, insecure defaults, silent auth failures." },
+            { agent: AGENTS.find((x) => x.name === "product")!,   step: "02", action: "Writes the roadmap. Builds a prioritised backlog from feedback + issues, publishes it as ROADMAP.md, queues features and spike tasks." },
+            { agent: AGENTS.find((x) => x.name === "pm")!,        step: "03", action: "Plans the fix. Decomposes the task, sets maxRounds (2–5 based on complexity), injects focus areas + risk flags. Consults cross-run memory." },
+            { agent: AGENTS.find((x) => x.name === "architect")!, step: "04", action: "Designs the contract. Produces file-level interfaces and test hints before the coder touches a key." },
+            { agent: AGENTS.find((x) => x.name === "coder")!,     step: "05", action: "Writes it. Implements against the architect's contract, opens the PR via gh CLI, iterates on review feedback with force-push-with-lease." },
+            { agent: AGENTS.find((x) => x.name === "tester")!,    step: "06", action: "Proves it. Writes a _test.go file, runs go test ./..., reports pass or fail with the actual output." },
+            { agent: AGENTS.find((x) => x.name === "reviewer")!,  step: "07", action: "Ships it. Reviews against the constitution. Accept → merge. Negotiable reject → coder iterates. Non-negotiable → kill the PR, no appeals." },
+          ].map(({ agent, step, action }, i) => (
+            <FadeIn key={agent.name} delay={i * 50}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isNarrow ? "32px 3px 1fr" : "36px 3px 180px 1fr",
+                  columnGap: space.md,
+                  rowGap: space.xs,
+                  alignItems: "start",
+                  padding: `${space.md} 0`,
+                  borderBottom: `1px solid ${color.hairline}`,
+                }}
+              >
+                <div style={{ fontSize: "9px", color: color.textGhost, letterSpacing: "0.1em", paddingTop: "3px" }}>
+                  {step}
+                </div>
+                <div style={{
+                  width: "3px",
+                  height: isNarrow ? "100%" : "48px",
+                  background: agent.color,
+                  borderRadius: "2px",
+                  boxShadow: `0 0 12px ${agent.color}77`,
+                }} />
+                {!isNarrow && (
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 800, color: agent.color, letterSpacing: "0.12em" }}>
+                      {agent.role}
+                    </div>
+                    <div style={{ fontSize: "10px", color: color.textFaint, marginTop: "3px", letterSpacing: "0.04em" }}>
+                      {agent.character} · {agent.ship}
+                    </div>
+                  </div>
+                )}
+                <div style={{ fontSize: "13.5px", color: color.textDim, lineHeight: 1.65 }}>
+                  {isNarrow && (
+                    <div style={{ fontSize: "10.5px", fontWeight: 800, color: agent.color, letterSpacing: "0.12em", marginBottom: "4px" }}>
+                      {agent.role} · {agent.character}
+                    </div>
+                  )}
+                  {action}
+                </div>
+              </div>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={400}>
+          <div style={{
+            marginTop: space.lg,
+            padding: "16px 22px",
+            background: "rgba(0,255,135,0.04)",
+            border: `1px solid ${color.accent}22`,
+            borderRadius: "8px",
+            fontSize: "12px",
+            color: color.textMute,
             lineHeight: 1.8,
           }}>
-            Ships orbit. Lasers fly. Code ships.
-          </p>
-          <button
-            onClick={() => navigate("/app")}
-            style={{
-              background: "linear-gradient(135deg, #00ff87, #00c8ff)",
-              border: "none",
-              borderRadius: "8px",
-              color: "#04040f",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: 900,
-              letterSpacing: "0.16em",
-              padding: "20px 56px",
-              fontFamily: "inherit",
-              boxShadow: "0 0 60px rgba(0,255,135,0.35)",
-              transition: "all 0.25s",
-            }}
-            onMouseOver={e => {
-              e.currentTarget.style.boxShadow = "0 0 100px rgba(0,255,135,0.55)"
-              e.currentTarget.style.transform = "translateY(-2px) scale(1.02)"
-            }}
-            onMouseOut={e => {
-              e.currentTarget.style.boxShadow = "0 0 60px rgba(0,255,135,0.35)"
-              e.currentTarget.style.transform = "none"
-            }}
-          >
-            OPEN MISSION CONTROL →
-          </button>
+            <span style={{ color: color.accent, fontWeight: 700 }}>Autonomous.</span>{" "}
+            Steps 01 – 02 run on a clock (Scout every 5 minutes, Product every 15).
+            Steps 05 – 07 loop until convergence. No human approves anything.
+          </div>
         </FadeIn>
-      </section>
+      </Section>
 
-      {/* ── FOOTER ── */}
-      <footer style={{
-        position: "relative",
-        zIndex: 1,
-        borderTop: "1px solid rgba(255,255,255,0.04)",
-        padding: "24px 28px",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "16px",
-        alignItems: "center",
-        justifyContent: "space-between",
-        fontSize: "9px",
-        color: "rgba(255,255,255,0.15)",
-        letterSpacing: "0.1em",
-      }}>
-        <div>ASTROPHAGE · AGENT COMPANY · PROJECT HAIL MARY</div>
-        <div style={{ display: "flex", gap: "20px" }}>
-          <button onClick={() => navigate("/docs")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "9px", color: "rgba(255,255,255,0.15)", letterSpacing: "0.1em", fontFamily: "inherit" }}>DOCS</button>
-          <a href="https://github.com/chinmayrelkar/astrophage" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>GITHUB</a>
-          <a href="https://en.wikipedia.org/wiki/Project_Hail_Mary" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>THE NOVEL</a>
-          <a href="https://opencode.ai" target="_blank" rel="noreferrer" style={{ color: "rgba(255,255,255,0.15)", textDecoration: "none" }}>OPENCODE</a>
+      {/* ═══ ROCKY'S CONSTITUTION ═══ */}
+      <Section id="constitution" width="base" pad="loose" divider>
+        <FadeIn>
+          <Eyebrow dot dotColor={color.warn} style={{ marginBottom: space.lg }}>
+            The Constitution · Rocky's Rules
+          </Eyebrow>
+          <H level={2} style={{ marginBottom: space.lg, maxWidth: "760px" }}>
+            Rocky has rules, not opinions.
+          </H>
+          <p style={{ fontSize: type.bodyLg, color: color.textMute, lineHeight: 1.8, maxWidth: "640px", marginBottom: space.xl }}>
+            The reviewer operates against a constitution compiled into the source code.
+            Five rules are non-negotiable — one violation ends the PR. Five are negotiable —
+            the coder gets another round to push back.
+          </p>
+        </FadeIn>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+          gap: "2px",
+          borderRadius: "12px",
+          overflow: "hidden",
+          border: `1px solid ${color.hairline}`,
+        }}>
+          <FadeIn>
+            <div style={{
+              background: "rgba(239,68,68,0.06)",
+              padding: "clamp(24px, 3vw, 40px)",
+              height: "100%",
+            }}>
+              <Pill tone="danger">Non-Negotiable · Instant Block</Pill>
+              <div style={{ fontSize: "11px", color: color.textFaint, letterSpacing: "0.06em", marginTop: space.sm, marginBottom: space.lg, lineHeight: 1.7 }}>
+                Rocky kills the PR. No rounds. No appeal.
+              </div>
+              {[
+                "No hardcoded secrets, API keys, or client_ids in source code",
+                "No credentials or tokens passed via URL query parameters",
+                "Authentication must never silently succeed — missing env var = hard exit",
+                "No plaintext HTTP for token exchange or credential submission",
+                "Token refresh logic must be present for OAuth flows",
+              ].map((r) => (
+                <div key={r} style={{ display: "flex", gap: "12px", marginBottom: "14px", fontSize: "12.5px", color: color.textDim, lineHeight: 1.6 }}>
+                  <span style={{ color: color.danger, flexShrink: 0, marginTop: "1px", fontWeight: 700 }}>✕</span>
+                  {r}
+                </div>
+              ))}
+            </div>
+          </FadeIn>
+
+          <FadeIn delay={120}>
+            <div style={{
+              background: "rgba(251,191,36,0.045)",
+              padding: "clamp(24px, 3vw, 40px)",
+              height: "100%",
+            }}>
+              <Pill tone="warn">Negotiable · Push Back</Pill>
+              <div style={{ fontSize: "11px", color: color.textFaint, letterSpacing: "0.06em", marginTop: space.sm, marginBottom: space.lg, lineHeight: 1.7 }}>
+                Reviewer flags it. Coder iterates. Consensus or max rounds.
+              </div>
+              {[
+                "Environment variable naming convention",
+                "Error message wording and verbosity",
+                "Fallback behavior when optional config is missing",
+                "Code style and formatting preferences",
+                "Log level choices",
+              ].map((r) => (
+                <div key={r} style={{ display: "flex", gap: "12px", marginBottom: "14px", fontSize: "12.5px", color: color.textDim, lineHeight: 1.6 }}>
+                  <span style={{ color: color.warn, flexShrink: 0, marginTop: "1px", fontWeight: 700 }}>~</span>
+                  {r}
+                </div>
+              ))}
+            </div>
+          </FadeIn>
         </div>
-      </footer>
+
+        <FadeIn delay={280} style={{ marginTop: space.md }}>
+          <div style={{ fontSize: "11px", color: color.textFaint, lineHeight: 1.7 }}>
+            Source: <Code>src/constitution.ts</Code> — the reviewer prompt is generated from this list at boot.
+          </div>
+        </FadeIn>
+      </Section>
+
+      {/* ═══ SELECTED MISSIONS ═══ */}
+      <Section id="missions" width="base" pad="loose" divider>
+        <FadeIn>
+          <Eyebrow style={{ marginBottom: space.lg }}>Selected Missions · Flight Record</Eyebrow>
+          <H level={2} style={{ marginBottom: space.lg, maxWidth: "740px" }}>
+            Three merges Rocky approved. One PR Rocky killed.
+          </H>
+          <p style={{ fontSize: type.bodyLg, color: color.textMute, lineHeight: 1.8, maxWidth: "640px", marginBottom: space.xl }}>
+            These are real runs against{" "}
+            <a href="https://github.com/chinmayrelkar/bawarchi" target="_blank" rel="noreferrer" style={{ color: color.accent, textDecoration: "none" }}>
+              chinmayrelkar/bawarchi
+            </a>
+            . PR links below go to the actual diffs. The kill shot is from the run-memory store — Rocky's verdict, verbatim.
+          </p>
+        </FadeIn>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr 1fr",
+          gap: space.md,
+          marginBottom: space.lg,
+        }}>
+          {MERGED_MISSIONS.map((m, i) => (
+            <FadeIn key={m.pr} delay={i * 80}>
+              <Card accent={color.accent} hoverLift style={{ height: "100%", display: "flex", flexDirection: "column", gap: space.sm }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                  <Pill tone="accent">Merged · {m.rounds} round{m.rounds === 1 ? "" : "s"}</Pill>
+                  <a
+                    href={`https://github.com/chinmayrelkar/bawarchi/pull/${m.pr}`}
+                    target="_blank" rel="noreferrer"
+                    style={{ fontSize: "10px", color: color.accent, textDecoration: "none", letterSpacing: "0.08em", fontWeight: 700 }}
+                  >
+                    PR #{m.pr} ↗
+                  </a>
+                </div>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "white", lineHeight: 1.35, letterSpacing: "-0.005em" }}>
+                  {m.title}
+                </div>
+                <div style={{ fontSize: "12.5px", color: color.textDim, lineHeight: 1.65 }}>
+                  {m.oneLine}
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={280}>
+          <Card accent={color.danger} style={{ borderStyle: "solid" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: space.sm }}>
+              <Pill tone="danger">Non-Negotiable · Round 1 Kill</Pill>
+              <span style={{ fontSize: "10px", color: color.textFaint, letterSpacing: "0.08em" }}>
+                Rule #4 · Plaintext credential submission
+              </span>
+            </div>
+            <div style={{ fontSize: "14px", fontWeight: 800, color: "white", marginBottom: space.sm, lineHeight: 1.4 }}>
+              {BLOCKED_MISSION.title}
+            </div>
+            <div style={{ fontSize: "12.5px", color: color.textDim, lineHeight: 1.7 }}>
+              {BLOCKED_MISSION.reason}
+            </div>
+          </Card>
+        </FadeIn>
+      </Section>
+
+      {/* ═══ UNDER THE HOOD ═══ */}
+      <Section id="systems" width="base" pad="loose" divider>
+        <FadeIn>
+          <Eyebrow style={{ marginBottom: space.lg }}>Under the Hood</Eyebrow>
+          <H level={2} style={{ marginBottom: space.lg, maxWidth: "740px" }}>
+            A small, honest systems stack.
+          </H>
+        </FadeIn>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+          gap: space.md,
+        }}>
+          {[
+            { label: "Autonomous loop",       body: "Scout fires every 5 min, Product every 15. One pipeline at a time. Bug tasks prepend, features append. All schedules are env-tunable." },
+            { label: "Persistence",           body: "Runs, events, task queue, backlog, seen-issues, cross-run memory, eval history — all in ~/.astrophage. Crashes are recoverable; events are written incrementally as NDJSON." },
+            { label: "Live telemetry",        body: "SSE stream of every agent token. Per-run page with Events + Trace tabs. Call graph with duration and estimated cost at each span." },
+            { label: "Cross-run memory",      body: "Every finished run (merged, unresolved, blocked) writes lessons back. The next PM plan for the same repo reads the last five outcomes before estimating maxRounds." },
+            { label: "Evaluation harness",    body: "12 named cases covering reviewer parsing, tester parsing, and pipeline convergence. CI workflow runs them on every push. Regressions block the PR." },
+            { label: "Filesystem-only kill",  body: "The public UI and HTTP API cannot pause the loop. Only a local operator can — via npm run pause, which writes ~/.astrophage/loop-state.json. Designed for a public demo." },
+          ].map((item, i) => (
+            <FadeIn key={item.label} delay={i * 60}>
+              <Card hoverLift style={{ height: "100%" }}>
+                <div style={{ fontSize: "10px", fontWeight: 800, color: color.accent, letterSpacing: "0.18em", marginBottom: space.sm, textTransform: "uppercase" }}>
+                  {item.label}
+                </div>
+                <div style={{ fontSize: "12.5px", color: color.textDim, lineHeight: 1.75 }}>
+                  {item.body}
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={380}>
+          <div style={{ marginTop: space.xl }}>
+            <div style={{ fontSize: "10px", color: color.textFaint, letterSpacing: "0.18em", marginBottom: space.sm, textTransform: "uppercase" }}>
+              Stack
+            </div>
+            <CodeBlock>
+{`TypeScript · tsx · Hono                 — orchestrator
+OpenCode SDK v2                         — agent sessions
+opencode/claude-sonnet-4-6              — model (Sonnet rates: $3/M in, $15/M out)
+Vite · React · Canvas 2D                — web UI
+gh CLI                                  — git + GitHub ops
+GitHub Actions                          — eval regression gate`}
+            </CodeBlock>
+          </div>
+        </FadeIn>
+      </Section>
+
+      {/* ═══ FINAL CTA ═══ */}
+      <Section pad="loose" width="base" divider>
+        <FadeIn>
+          <div style={{ textAlign: "center" }}>
+            <Eyebrow dot style={{ marginBottom: space.lg }}>
+              Ready for Launch
+            </Eyebrow>
+            <H level={2} style={{ marginBottom: space.lg, fontSize: "clamp(36px, 5vw, 60px)" }}>
+              Watch the crew work.
+            </H>
+            <p style={{ fontSize: type.bodyLg, color: color.textMute, marginBottom: space.xl, lineHeight: 1.8 }}>
+              Ships orbit. Lasers fly. Code ships.
+            </p>
+            <Button variant="primary" size="lg" onClick={() => navigate("/app")} style={{ padding: "20px 52px", fontSize: "13px" }}>
+              OPEN MISSION CONTROL →
+            </Button>
+          </div>
+        </FadeIn>
+      </Section>
+
+      <Footer />
     </div>
   )
 }
