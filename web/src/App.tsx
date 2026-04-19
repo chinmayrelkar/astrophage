@@ -3,13 +3,16 @@ import { useSpaceState } from "./space/useSpaceState"
 import { SpaceCanvas } from "./space/SpaceCanvas"
 import { MissionLog } from "./space/MissionLog"
 import { TaskHistory } from "./space/TaskHistory"
+import { LandingPage } from "./LandingPage"
 import type { AgentName } from "./hooks/useAgentStream"
 
 export default function App() {
-  const { agents, beams, log, currentRound, connected, task, runs } = useSpaceState()
+  const [showLanding, setShowLanding] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<AgentName | null>(null)
   const [logOpen, setLogOpen] = useState(true)
   const [_selectedRun, setSelectedRun] = useState<string | null>(null)
+
+  const { agents, beams, log, currentRound, connected, task, runs } = useSpaceState()
 
   const handleShipClick = useCallback((name: AgentName) => {
     setSelectedAgent((prev) => prev === name ? null : name)
@@ -20,6 +23,10 @@ export default function App() {
     setSelectedAgent(null)
     setLogOpen(false)
   }, [])
+
+  if (showLanding) {
+    return <LandingPage onEnter={() => setShowLanding(false)} />
+  }
 
   return (
     <div style={{
@@ -42,9 +49,20 @@ export default function App() {
         background: "rgba(5,5,20,0.9)",
         zIndex: 10,
       }}>
-        <span style={{ fontWeight: 700, fontSize: "14px", letterSpacing: "0.2em", color: "white" }}>
-          ASTROPHAGE
-        </span>
+        <button
+          onClick={() => setShowLanding(true)}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            fontFamily: "inherit",
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: "14px", letterSpacing: "0.2em", color: "white" }}>
+            ASTROPHAGE
+          </span>
+        </button>
         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.25)", letterSpacing: "0.1em" }}>
           PROJECT HAIL MARY · AGENT COMPANY
         </span>
