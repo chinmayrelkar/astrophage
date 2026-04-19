@@ -172,6 +172,18 @@ export function SpaceCanvas({ agents, beams, currentRound, task, onShipClick }: 
       ctx.fillStyle = "rgba(255,255,255,0.25)"
       ctx.fillText(agent.ship, sx, sy + bodyR + 24)
 
+      // Role description (dimmer still, only when active or done)
+      if (isActive || isDone) {
+        ctx.font = "7px 'JetBrains Mono', monospace"
+        ctx.fillStyle = isActive
+          ? hexToRgba(agent.color, 0.45)
+          : "rgba(255,255,255,0.15)"
+        const desc = agent.description.length > 36
+          ? agent.description.slice(0, 34) + "…"
+          : agent.description
+        ctx.fillText(desc, sx, sy + bodyR + 35)
+      }
+
       // Last message bubble
       if (state?.lastMessage && isActive) {
         const msg = state.lastMessage.slice(0, 40)

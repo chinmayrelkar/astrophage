@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { apiUrl } from "../api"
+import { AGENT_MAP } from "../space/agents"
 
 interface AgentEvent {
   agent: string
@@ -55,34 +56,12 @@ interface CostBreakdown {
   }>
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  coder: "#00ff87",
-  reviewer: "#fbbf24",
-  pm: "#a78bfa",
-  tester: "#f472b6",
-  architect: "#60a5fa",
-  git: "#34d399",
-  orchestrator: "#94a3b8",
-}
+// ─── Agent metadata helpers (single source of truth: agents.ts) ──────────────
 
-const AGENT_CHARS: Record<string, string> = {
-  coder: "Ryland Grace",
-  reviewer: "Rocky",
-  pm: "Stratt",
-  tester: "Yao",
-  architect: "Ilyukhina",
-  git: "DuBois",
-  orchestrator: "Mission Control",
-}
+const ORCHESTRATOR = { color: "#94a3b8", character: "Mission Control", emoji: "🌌", ship: "—", description: "Coordinates the full pipeline." }
 
-const AGENT_EMOJI: Record<string, string> = {
-  coder: "🚀",
-  reviewer: "🪨",
-  pm: "🛸",
-  tester: "🔬",
-  architect: "📐",
-  git: "📦",
-  orchestrator: "🌌",
+function agentMeta(name: string) {
+  return AGENT_MAP[name as keyof typeof AGENT_MAP] ?? ORCHESTRATOR
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -106,9 +85,7 @@ function fmtDuration(ms?: number): string {
 }
 
 function TraceNodeRow({ node, depth }: { node: TraceNode; depth: number }) {
-  const color = AGENT_COLORS[node.agent] ?? "#94a3b8"
-  const char = AGENT_CHARS[node.agent] ?? node.agent
-  const emoji = AGENT_EMOJI[node.agent] ?? "•"
+  const meta = agentMeta(node.agent)
   const indent = depth * 24
 
   return (
@@ -128,10 +105,10 @@ function TraceNodeRow({ node, depth }: { node: TraceNode; depth: number }) {
             flexShrink: 0, marginTop: "9px",
           }} />
         )}
-        <span style={{ fontSize: "13px", flexShrink: 0 }}>{emoji}</span>
+        <span style={{ fontSize: "13px", flexShrink: 0 }}>{meta.emoji}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "10px", color, fontWeight: 700 }}>{char}</span>
+            <span style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</span>
             {node.round > 0 && (
               <span style={{
                 fontSize: "8px", padding: "1px 5px",
@@ -150,6 +127,9 @@ function TraceNodeRow({ node, depth }: { node: TraceNode; depth: number }) {
                 </span>
               )}
             </div>
+          </div>
+          <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", marginTop: "1px" }}>
+            {meta.description}
           </div>
           {node.tokenStats && (
             <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", marginTop: "2px", display: "flex", gap: "10px" }}>
@@ -380,9 +360,7 @@ export function RunPage() {
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {events.map((event) => {
-                    const color = AGENT_COLORS[event.agent] ?? "#94a3b8"
-                    const char = AGENT_CHARS[event.agent] ?? event.agent
-                    const emoji = AGENT_EMOJI[event.agent] ?? "•"
+                    const meta = agentMeta(event.agent)
                     const isVerdict = event.type === "verdict"
                     const isConverge = event.type === "convergence"
                     const isGit = event.type === "git_action"
@@ -410,18 +388,22 @@ export function RunPage() {
                         borderLeft: `2px solid ${isConverge || isGit ? accent : "rgba(255,255,255,0.05)"}`,
                         borderRadius: "0 4px 4px 0",
                       }}>
-                        <span style={{ fontSize: "14px", flexShrink: 0, marginTop: "1px" }}>{emoji}</span>
+                        <span style={{ fontSize: "14px", flexShrink: 0, marginTop: "1px" }}>{meta.emoji}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
-                            <span style={{ fontSize: "10px", color, fontWeight: 700 }}>{char}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                            <div>
+                              <span style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</span>
+                              <span style={{ fontSize: "8px", color: "rgba(255,255,255,0.2)", marginLeft: "6px" }}>{meta.description}</span>
+                            </div>
                             <span style={{
                               fontSize: "8px", padding: "1px 5px",
                               background: "rgba(255,255,255,0.05)", borderRadius: "2px",
                               color: "rgba(255,255,255,0.25)", letterSpacing: "0.05em",
+                              flexShrink: 0,
                             }}>
                               {event.type.replace("_", " ").toUpperCase()}
                             </span>
-                            <span style={{ marginLeft: "auto", fontSize: "8px", color: "rgba(255,255,255,0.15)" }}>
+                            <span style={{ marginLeft: "auto", fontSize: "8px", color: "rgba(255,255,255,0.15)", flexShrink: 0 }}>
                               {new Date(event.timestamp).toLocaleTimeString()}
                             </span>
                           </div>
@@ -494,18 +476,21 @@ export function RunPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                   {costs.byAgent.map((a) => {
-                    const color = AGENT_COLORS[a.agent] ?? "#94a3b8"
-                    const char = AGENT_CHARS[a.agent] ?? a.agent
+                    const meta = agentMeta(a.agent)
                     return (
                       <div key={a.agent} style={{
                         display: "flex", alignItems: "center", gap: "12px",
                         padding: "8px 12px",
                         background: "rgba(255,255,255,0.02)",
-                        borderLeft: `2px solid ${color}30`,
+                        borderLeft: `2px solid ${meta.color}30`,
                         borderRadius: "0 4px 4px 0",
                       }}>
-                        <span style={{ fontSize: "10px", color, fontWeight: 700, width: "90px", flexShrink: 0 }}>{char}</span>
-                        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", width: "50px" }}>{a.turns} turn{a.turns !== 1 ? "s" : ""}</span>
+                        <span style={{ fontSize: "11px", flexShrink: 0 }}>{meta.emoji}</span>
+                        <div style={{ flexShrink: 0, width: "140px" }}>
+                          <div style={{ fontSize: "10px", color: meta.color, fontWeight: 700 }}>{meta.character}</div>
+                          <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.25)" }}>{meta.description}</div>
+                        </div>
+                        <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)", width: "50px", flexShrink: 0 }}>{a.turns} turn{a.turns !== 1 ? "s" : ""}</span>
                         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.4)" }}>{a.inputTokens.toLocaleString()} in / {a.outputTokens.toLocaleString()} out</span>
                         <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 700, color: "#fbbf24" }}>${a.estimatedCostUSD.toFixed(4)}</span>
                         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)" }}>{Math.round(a.totalDurationMs / 1000)}s total</span>
