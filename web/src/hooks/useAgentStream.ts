@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react"
+import { apiUrl } from "../api"
 
 // ─── Types (mirrored from orchestrator/src/types.ts) ─────────────────────────
 
@@ -160,7 +161,7 @@ export function useAgentStream() {
   handleEventRef.current = handleEvent
 
   useEffect(() => {
-    const source = new EventSource("/events")
+    const source = new EventSource(apiUrl("/events"))
 
     // onopen fires before any messages — safe place to mark connected
     source.onopen = () => setConnected(true)

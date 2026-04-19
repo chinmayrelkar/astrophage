@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { apiUrl } from "../api"
 
 interface RepoContext {
   localPath: string
@@ -21,7 +22,7 @@ export function TaskStrip() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const res = await fetch("/task")
+        const res = await fetch(apiUrl("/task"))
         if (res.ok) {
           const data = await res.json()
           if (data) setTask(data)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
+import { apiUrl } from "../api"
 
 interface AgentEvent {
   agent: string
@@ -178,7 +179,7 @@ export function RunPage() {
   const [costs, setCosts] = useState<CostBreakdown | null>(null)
 
   useEffect(() => {
-    fetch(`/runs/${id}`)
+    fetch(apiUrl(`/runs/${id}`))
       .then((r) => {
         if (!r.ok) throw new Error("Run not found")
         return r.json()

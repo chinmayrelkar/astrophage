@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { apiUrl } from "../api"
 
 interface TaskOption {
   key: string
@@ -53,7 +54,7 @@ export function NewTaskModal({ onClose }: Props) {
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    fetch("/tasks")
+    fetch(apiUrl("/tasks"))
       .then((r) => r.json())
       .then(setTasks)
       .catch(() => setError("Could not fetch available tasks"))
@@ -64,7 +65,7 @@ export function NewTaskModal({ onClose }: Props) {
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch("/task/submit", {
+      const res = await fetch(apiUrl("/task/submit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: selected }),
@@ -94,7 +95,7 @@ export function NewTaskModal({ onClose }: Props) {
       },
     }
     try {
-      const res = await fetch("/task", {
+      const res = await fetch(apiUrl("/task"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(task),

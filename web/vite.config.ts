@@ -7,13 +7,10 @@ export default defineConfig({
     port: 5173,
     allowedHosts: true,
     proxy: {
-      "/events": "http://127.0.0.1:3001",
-      "/transcript": "http://127.0.0.1:3001",
-      "/health": "http://127.0.0.1:3001",
-      "/runs": "http://127.0.0.1:3001",
-      "/task": "http://127.0.0.1:3001",
-      "/tasks": "http://127.0.0.1:3001",
-      "/status": "http://127.0.0.1:3001",
+      "/astrophage-api": {
+        target: "http://127.0.0.1:3001",
+        rewrite: (path) => path.replace(/^\/astrophage-api/, ""),
+      },
     },
   },
 })

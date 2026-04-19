@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import type { AgentName } from "../hooks/useAgentStream"
+import { apiUrl } from "../api"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ export function useSpaceState() {
 
   // SSE connection
   useEffect(() => {
-    const source = new EventSource("/events")
+    const source = new EventSource(apiUrl("/events"))
     source.onopen = () => setConnected(true)
     source.onerror = () => setConnected(false)
     source.addEventListener("ping", () => setConnected(true))
@@ -183,7 +184,7 @@ export function useSpaceState() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const [tRes, rRes] = await Promise.all([fetch("/task"), fetch("/runs")])
+        const [tRes, rRes] = await Promise.all([fetch(apiUrl("/task")), fetch(apiUrl("/runs"))])
         if (tRes.ok) { const d = await tRes.json(); if (d) setTask(d) }
         if (rRes.ok) setRuns(await rRes.json())
       } catch { }

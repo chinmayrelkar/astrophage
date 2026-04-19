@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { apiUrl } from "../api"
 import type { AgentEvent } from "./useAgentStream"
 
 export interface RunSummary {
@@ -22,7 +23,7 @@ export function useRunHistory() {
 
   const fetchRuns = useCallback(async () => {
     try {
-      const res = await fetch("/runs")
+      const res = await fetch(apiUrl("/runs"))
       if (res.ok) setRuns(await res.json())
     } catch { /* server not up yet */ }
   }, [])
@@ -30,7 +31,7 @@ export function useRunHistory() {
   const selectRun = useCallback(async (id: string) => {
     setLoadingDetail(true)
     try {
-      const res = await fetch(`/runs/${id}`)
+      const res = await fetch(apiUrl(`/runs/${id}`))
       if (res.ok) setSelected(await res.json())
     } finally {
       setLoadingDetail(false)
