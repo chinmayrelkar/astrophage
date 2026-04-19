@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 
 // ─── Types (mirrored from orchestrator/src/types.ts) ─────────────────────────
 
@@ -60,6 +60,7 @@ export function useAgentStream() {
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [connected, setConnected] = useState(false)
 
+  // Stable updater — always uses functional setState so no stale closure on agents
   const updateAgent = useCallback((name: AgentName, update: Partial<AgentState>) => {
     setAgents((prev) => ({
       ...prev,
@@ -67,6 +68,8 @@ export function useAgentStream() {
     }))
   }, [])
 
+  // handleEvent never closes over agents state — all mutations go through
+  // functional setState updaters that receive fresh prev state.
   const handleEvent = useCallback(
     (event: AgentEvent) => {
       setEvents((prev) => [...prev, event])
@@ -84,11 +87,7 @@ export function useAgentStream() {
       }
 
       if (type === "turn_end") {
-        updateAgent(agent, {
-          status: "done",
-          lines: (prev => [...prev, content])([]),
-        })
-        // Reset lines properly
+        // Single functional setState — appends content to existing lines
         setAgents((prev) => ({
           ...prev,
           [agent]: {
@@ -116,10 +115,15 @@ export function useAgentStream() {
       }
 
       if (type === "convergence") {
-        updateAgent("orchestrator", {
-          status: content.startsWith("ACCEPT") ? "done" : "blocked",
-          lines: [...agents["orchestrator"].lines, content],
-        })
+        // Use functional setState to avoid stale closure on orchestrator lines
+        setAgents((prev) => ({
+          ...prev,
+          orchestrator: {
+            ...prev.orchestrator,
+            status: content.startsWith("ACCEPT") ? "done" : "blocked",
+            lines: [...prev.orchestrator.lines, content],
+          },
+        }))
         return
       }
 
@@ -135,8 +139,13 @@ export function useAgentStream() {
         }))
       }
     },
-    [updateAgent, agents],
+    [updateAgent], // no longer depends on agents — all reads go through prev
   )
+
+  // Stable ref to handleEvent so the EventSource listener is set up once
+  // and always calls the latest version without recreating the source.
+  const handleEventRef = useRef(handleEvent)
+  handleEventRef.current = handleEvent
 
   useEffect(() => {
     const source = new EventSource("/events")
@@ -145,7 +154,7 @@ export function useAgentStream() {
     source.addEventListener("agent_event", (e: MessageEvent) => {
       try {
         const event: AgentEvent = JSON.parse(e.data)
-        handleEvent(event)
+        handleEventRef.current(event)
       } catch {
         // ignore malformed events
       }
@@ -155,7 +164,7 @@ export function useAgentStream() {
     source.onopen = () => setConnected(true)
 
     return () => source.close()
-  }, [handleEvent])
+  }, []) // stable: EventSource created once, ref always points to latest handler
 
   return { agents, currentRound, events, connected }
 }
