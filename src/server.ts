@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { streamSSE } from "hono/streaming"
 import { transcript } from "./transcript.js"
-import type { AgentEvent, PipelineStatus, RepoContext } from "./types.js"
+import type { AgentEvent, PipelineStatus, RepoContext, Task } from "./types.js"
 
 // ─── Current task info ────────────────────────────────────────────────────────
 
@@ -118,6 +118,84 @@ app.get("/runs/:id", (c) => {
   const run = runs.find((r) => r.id === c.req.param("id"))
   if (!run) return c.json({ error: "not found" }, 404)
   return c.json(run)
+})
+
+// Pipeline status
+app.get("/status", (c) => {
+  return c.json({
+    running: _currentRun !== null,
+    currentTask: _currentTask,
+    currentRun: _currentRun ? { ...(_currentRun), events: undefined } : null,
+  })
+})
+
+// List available tasks (from demo registry)
+app.get("/tasks", async (c) => {
+  const { TASKS } = await import("../demo/index.js")
+  return c.json(
+    Object.entries(TASKS).map(([key, task]) => ({
+      key,
+      id: task.id,
+      title: task.title,
+      description: task.description,
+    })),
+  )
+})
+
+// Submit a task by key (from demo registry)
+app.post("/task/submit", async (c) => {
+  const { isPipelineRunning, runPipeline } = await import("./pipeline.js")
+  const { TASKS } = await import("../demo/index.js")
+
+  if (isPipelineRunning()) {
+    return c.json({ error: "A pipeline is already running" }, 409)
+  }
+
+  let key: string
+  try {
+    const body = await c.req.json<{ key: string }>()
+    key = body.key
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400)
+  }
+
+  const task = TASKS[key]
+  if (!task) {
+    return c.json({ error: `Unknown task key: "${key}"` }, 404)
+  }
+
+  runPipeline(task).catch((err) => {
+    console.error("[ASTROPHAGE] Background pipeline error:", err)
+  })
+
+  return c.json({ accepted: true, taskId: task.id }, 202)
+})
+
+// Submit a full task object async — pipeline runs in background
+app.post("/task", async (c) => {
+  const { isPipelineRunning, runPipeline } = await import("./pipeline.js")
+
+  if (isPipelineRunning()) {
+    return c.json({ error: "A pipeline is already running" }, 409)
+  }
+
+  let task: Task
+  try {
+    task = await c.req.json<Task>()
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400)
+  }
+
+  if (!task.id || !task.title || !task.description || !task.repo) {
+    return c.json({ error: "Missing required fields: id, title, description, repo" }, 400)
+  }
+
+  // Fire and forget — pipeline runs in background
+  runPipeline(task).catch((err) => {
+    console.error("[ASTROPHAGE] Background pipeline error:", err)
+  })
+
+  return c.json({ accepted: true, taskId: task.id }, 202)
 })
 
 export function startServer(port = 3001): Promise<void> {
