@@ -1,5 +1,5 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import { getClient, promptAndWait } from "../client.js"
+import { getClient, promptAndWait, registerSession, unregisterSession } from "../client.js"
 import type { RepoContext, ReviewVerdict } from "../types.js"
 import type { PRInfo } from "./coder.js"
 import { agentTurn, emit } from "../transcript.js"
@@ -32,6 +32,7 @@ async function ensureSession(repo: RepoContext): Promise<string> {
       ],
     })
     _sessionID = res.data!.id
+    registerSession(_sessionID, "reviewer")
 
     await promptAndWait(oc, {
       sessionID: _sessionID,
@@ -71,6 +72,7 @@ export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number): Pr
   const sessionID = await ensureSession(repo)
 
   emit("reviewer", "turn_start", `Reviewing PR #${pr.number} (round ${round})`, round)
+  emit("reviewer", "git_action", `Reading PR diff #${pr.number}...`, round)
   console.log(`\n[REVIEWER] Reviewing PR #${pr.number}: ${pr.url}`)
 
   const prompt = `Review this PR and post your GitHub review.
@@ -101,6 +103,7 @@ Steps:
 
   agentTurn("reviewer", `Verdict: ${verdict.decision.toUpperCase()}`, label, round)
   emit("reviewer", "verdict", JSON.stringify(verdict), round)
+  emit("reviewer", "git_action", `Posting GitHub review...`, round)
   emit("reviewer", "git_action", `PR review posted: ${pr.url}`, round)
 
   return verdict
@@ -166,6 +169,7 @@ function parseVerdict(text: string, round: number): ReviewVerdict {
 export async function closeReviewerSession() {
   const oc = await getOc()
   if (_sessionID) {
+    unregisterSession(_sessionID)
     await oc.session.delete({ sessionID: _sessionID }).catch(() => {})
     _sessionID = null
   }

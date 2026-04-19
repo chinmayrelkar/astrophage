@@ -1,5 +1,7 @@
 import { createOpencodeClient, createOpencodeServer } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import type { AgentName } from "./types.js"
+import { emit } from "./transcript.js"
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 export const MODEL = { providerID: "opencode", modelID: "claude-sonnet-4-6" }
@@ -20,6 +22,50 @@ const DIR = "/home/ubuntu/bawarchi"
 
 let _client: OpencodeClient | null = null
 let _serverClose: (() => void) | null = null
+
+// ─── Session registry ─────────────────────────────────────────────────────────
+// Maps OpenCode sessionID → AgentName so the event loop can attribute tokens.
+
+const _sessionRegistry = new Map<string, AgentName>()
+
+export function registerSession(sessionID: string, agent: AgentName): void {
+  _sessionRegistry.set(sessionID, agent)
+}
+
+export function unregisterSession(sessionID: string): void {
+  _sessionRegistry.delete(sessionID)
+}
+
+// ─── Background event subscription loop ──────────────────────────────────────
+// Subscribes to the OpenCode global event stream and forwards token deltas to
+// the Astrophage transcript. Runs as a fire-and-forget background coroutine.
+
+let _eventLoopStarted = false
+
+function startEventLoop(client: OpencodeClient): void {
+  if (_eventLoopStarted) return
+  _eventLoopStarted = true
+
+  void (async () => {
+    while (true) {
+      try {
+        const { stream } = await client.event.subscribe()
+        for await (const event of stream) {
+          if (event.type !== "message.part.delta") continue
+          const props = event.properties
+          const agentName = _sessionRegistry.get(props.sessionID)
+          if (!agentName) continue
+          // Only forward text field deltas (not tool input etc.)
+          if (props.field !== "text") continue
+          emit(agentName, "token", props.delta, 0)
+        }
+      } catch (err) {
+        console.error("[ASTROPHAGE] Event stream error, reconnecting in 2s:", err)
+        await sleep(2_000)
+      }
+    }
+  })()
+}
 
 async function probeServer(baseUrl: string): Promise<boolean> {
   try {
@@ -43,6 +89,7 @@ export async function getClient(): Promise<OpencodeClient> {
   if (envURL) {
     console.log(`[ASTROPHAGE] Using OPENCODE_SERVER_URL: ${envURL}`)
     _client = createOpencodeClient({ baseUrl: envURL, directory: DIR })
+    startEventLoop(_client)
     return _client
   }
 
@@ -51,6 +98,7 @@ export async function getClient(): Promise<OpencodeClient> {
   if (await probeServer(tuiURL)) {
     console.log(`[ASTROPHAGE] Reusing existing OpenCode server at ${tuiURL}`)
     _client = createOpencodeClient({ baseUrl: tuiURL, directory: DIR })
+    startEventLoop(_client)
     return _client
   }
 
@@ -60,6 +108,7 @@ export async function getClient(): Promise<OpencodeClient> {
   _serverClose = server.close
   console.log(`[ASTROPHAGE] OpenCode server ready at ${server.url}`)
   _client = createOpencodeClient({ baseUrl: server.url, directory: DIR })
+  startEventLoop(_client)
   return _client
 }
 
@@ -68,6 +117,7 @@ export function closeServer() {
   _serverClose?.()
   _serverClose = null
   _client = null
+  _eventLoopStarted = false
 }
 
 // ─── promptAndWait ────────────────────────────────────────────────────────────
