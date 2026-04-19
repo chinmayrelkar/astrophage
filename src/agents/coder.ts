@@ -1,6 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
-import type { BugSeed, Patch, RepoContext, ReviewVerdict, TestResult } from "../types.js"
+import type { Task, Patch, RepoContext, ReviewVerdict, TestResult } from "../types.js"
 import { agentTurn, emit } from "../transcript.js"
 
 // ─── Coder Agent ──────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ let _sessionID: string | null = null
 async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    const res = await oc.session.create({ title: "Astrophage Coder" })
+    const res = await oc.session.create({ title: "Astrophage Coder — Ryland Grace" })
     _sessionID = res.data!.id
 
     await promptAndWait(oc, {
@@ -22,34 +22,36 @@ async function ensureSession(repo: RepoContext): Promise<string> {
       noReply: true,
       parts: [{
         type: "text",
-        text: `You are the Coder agent in the Astrophage agent company.
+        text: `You are Ryland Grace, the Coder agent in the Astrophage agent company.
+You are aboard the Hail Mary. Your job is to fix bugs in Go codebases.
 
-## Your task
-Fix bugs in the following Go repository:
-- Local path: ${repo.localPath}
+## Repo
 - Remote: ${repo.remoteUrl}
-- Default branch: ${repo.defaultBranch}
-${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} ${pr.url} "${pr.title}"`).join(", ")}` : ""}
+- Local: ${repo.localPath}
+- Branch: ${repo.defaultBranch}
+${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} "${pr.title}" ${pr.url}`).join(", ")}` : ""}
 
-The codebase is available in your working directory. Use your tools to read files.
+The codebase is in your working directory. Use your tools to explore it —
+read files, search for patterns, understand the code before proposing a fix.
 
 ## Rules
-- Always explain WHY the change fixes the bug.
-- Never introduce hardcoded secrets, tokens, or credentials.
-- If an auth env var is missing, the program must exit with a clear error — never silently proceed.
-- Keep diffs minimal — change only what is necessary.
+- Explore the repo yourself to find the relevant code. Do not ask for file locations.
+- Explain WHY your change fixes the problem.
+- Never hardcode secrets, tokens, or credentials.
+- If auth is required and the env var is missing, exit with a clear error — never proceed silently.
+- Keep changes minimal — only touch what is necessary.
 
 ## Output format
 Respond in EXACTLY this format, no other text:
-EXPLANATION: <why this fixes the bug>
+EXPLANATION: <why this fixes the problem>
 FILE: <relative path from repo root>
 ORIGINAL:
 \`\`\`go
-<original buggy snippet>
+<original code snippet you are replacing>
 \`\`\`
 PROPOSED:
 \`\`\`go
-<fixed snippet>
+<your fixed version>
 \`\`\``,
       }],
     })
@@ -57,40 +59,34 @@ PROPOSED:
   return _sessionID
 }
 
-function parseCoderResponse(raw: string, bug: BugSeed): Patch {
+function parseCoderResponse(raw: string, fallbackFile: string): Patch {
   const explanationMatch = raw.match(/EXPLANATION:\s*(.+?)(?=FILE:|$)/s)
   const fileMatch = raw.match(/FILE:\s*(.+?)(?=\n|$)/)
   const proposedMatch = raw.match(/PROPOSED:\s*```go\s*([\s\S]+?)```/)
   const originalMatch = raw.match(/ORIGINAL:\s*```go\s*([\s\S]+?)```/)
 
   return {
-    file: fileMatch?.[1]?.trim() ?? bug.file,
-    originalCode: originalMatch?.[1]?.trim() ?? bug.buggyCode,
+    file: fileMatch?.[1]?.trim() ?? fallbackFile,
+    originalCode: originalMatch?.[1]?.trim() ?? "",
     proposedCode: proposedMatch?.[1]?.trim() ?? raw,
     explanation: explanationMatch?.[1]?.trim() ?? "No explanation provided",
   }
 }
 
-export async function proposeInitialFix(bug: BugSeed, repo: RepoContext, round: number): Promise<Patch> {
+export async function proposeInitialFix(task: Task, round: number): Promise<Patch> {
   const oc = await getOc()
-  const sessionID = await ensureSession(repo)
+  const sessionID = await ensureSession(task.repo)
 
-  emit("coder", "turn_start", "Proposing initial fix for seeded bug", round)
-  console.log(`\n[CODER] Analyzing bug in ${bug.file}:${bug.startLine}-${bug.endLine}`)
-  console.log(`        ${bug.description}`)
+  emit("coder", "turn_start", "Exploring repo and proposing fix", round)
+  console.log(`\n[CODER] Reading task: ${task.title}`)
 
-  const prompt = `Fix the following bug.
+  const prompt = `Here is your task:
 
-Repo: ${repo.remoteUrl}
-Bug location: ${bug.file} lines ${bug.startLine}-${bug.endLine}
-Bug description: ${bug.description}
+## ${task.title}
 
-Buggy code:
-\`\`\`go
-${bug.buggyCode}
-\`\`\`
+${task.description}
 
-Read the file at ${bug.file} to understand the full context, then propose a minimal fix.
+Explore the repo, find the relevant code, and propose a minimal fix.
 Follow the output format exactly.`
 
   const result = await promptAndWait(oc, {
@@ -98,31 +94,31 @@ Follow the output format exactly.`
     parts: [{ type: "text", text: prompt }],
   })
 
-  const patch = parseCoderResponse(result.text, bug)
-  agentTurn("coder", "Initial fix proposed", `${patch.explanation}\n\nProposed fix in ${patch.file}`, round)
+  const patch = parseCoderResponse(result.text, "unknown")
+  agentTurn("coder", "Fix proposed", `${patch.explanation}\n\n→ ${patch.file}`, round)
   return patch
 }
 
 export async function iterateFix(
+  task: Task,
   previousPatch: Patch,
-  repo: RepoContext,
   verdict: ReviewVerdict | null,
   testResult: TestResult | null,
   round: number,
 ): Promise<Patch> {
   const oc = await getOc()
-  const sessionID = await ensureSession(repo)
+  const sessionID = await ensureSession(task.repo)
 
-  emit("coder", "turn_start", `Iterating fix based on feedback (round ${round})`, round)
-  console.log(`\n[CODER] Iterating fix — round ${round}`)
+  emit("coder", "turn_start", `Iterating fix (round ${round})`, round)
+  console.log(`\n[CODER] Iterating — round ${round}`)
 
-  let context = `Your previous proposed fix was:\n\`\`\`go\n${previousPatch.proposedCode}\n\`\`\`\n\n`
+  let context = `Your previous fix for ${previousPatch.file}:\n\`\`\`go\n${previousPatch.proposedCode}\n\`\`\`\n\n`
 
   if (testResult && !testResult.passed) {
     context += `Tests FAILED:\n${testResult.failures.join("\n")}\n\n`
   }
 
-  if (verdict && verdict.decision === "reject") {
+  if (verdict?.decision === "reject") {
     context += `Reviewer rejected: ${verdict.reason}`
     if (verdict.nonNegotiable) {
       context += ` [NON-NEGOTIABLE: ${verdict.violatedRule}]`
@@ -137,14 +133,7 @@ export async function iterateFix(
     parts: [{ type: "text", text: context }],
   })
 
-  const patch = parseCoderResponse(result.text, {
-    file: previousPatch.file,
-    startLine: 0,
-    endLine: 0,
-    description: "",
-    buggyCode: previousPatch.originalCode,
-  })
-
+  const patch = parseCoderResponse(result.text, previousPatch.file)
   agentTurn("coder", `Revised fix (round ${round})`, patch.explanation, round)
   return patch
 }
