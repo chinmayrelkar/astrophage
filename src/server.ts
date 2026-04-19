@@ -53,9 +53,9 @@ app.get("/transcript", (c) => {
 
 export function startServer(port = 3001): Promise<void> {
   return new Promise((resolve) => {
-    serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => {
-      console.log(`[ASTROPHAGE] Server running at http://0.0.0.0:${port}`)
-      console.log(`[ASTROPHAGE] SSE stream at http://0.0.0.0:${port}/events`)
+    serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
+      console.log(`[ASTROPHAGE] Server running at http://127.0.0.1:${port}`)
+      console.log(`[ASTROPHAGE] SSE stream at http://127.0.0.1:${port}/events`)
       resolve()
     })
   })
