@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import { useSpaceState } from "./space/useSpaceState"
 import { SpaceCanvas } from "./space/SpaceCanvas"
 import { MissionLog } from "./space/MissionLog"
@@ -12,6 +13,7 @@ export default function App() {
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [_selectedRun, setSelectedRun] = useState<string | null>(null)
 
+  const navigate = useNavigate()
   const { agents, beams, log, currentRound, connected, task, runs } = useSpaceState()
 
   const handleShipClick = useCallback((name: AgentName) => {
@@ -80,6 +82,24 @@ export default function App() {
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
           {/* New Task button */}
+          <button
+            onClick={() => navigate("/observability")}
+            style={{
+              background: "rgba(96,165,250,0.1)",
+              border: "1px solid rgba(96,165,250,0.3)",
+              borderRadius: "3px",
+              color: "rgba(96,165,250,0.85)",
+              cursor: "pointer",
+              fontSize: "9px",
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              padding: "3px 12px",
+              fontFamily: "inherit",
+            }}
+          >
+            OBSERVABILITY
+          </button>
+
           <button
             onClick={() => setTaskModalOpen(true)}
             style={{

@@ -265,6 +265,19 @@ export function LandingPage() {
           >
             DOCS
           </button>
+          <button
+            onClick={() => navigate("/observability")}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: "10px", color: "rgba(255,255,255,0.35)",
+              letterSpacing: "0.1em", fontFamily: "inherit",
+              transition: "color 0.2s",
+            }}
+            onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.75)")}
+            onMouseOut={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
+          >
+            OBSERVABILITY
+          </button>
           <a
             href="https://github.com/chinmayrelkar/astrophage"
             target="_blank" rel="noreferrer"

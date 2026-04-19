@@ -5,6 +5,7 @@ import { LandingPage } from "./LandingPage"
 import { DocsPage } from "./DocsPage"
 import SpaceApp from "./App"
 import { RunPage } from "./pages/RunPage"
+import { ObservabilityPage } from "./pages/ObservabilityPage"
 import "./styles/theme.css"
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -15,6 +16,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/app" element={<SpaceApp />} />
         <Route path="/run/:id" element={<RunPage />} />
+        <Route path="/observability" element={<ObservabilityPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
