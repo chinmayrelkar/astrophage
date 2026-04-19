@@ -1,10 +1,13 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { getClient, promptAndWait } from "../client.js"
-import type { Patch, RepoContext, ReviewVerdict } from "../types.js"
+import type { RepoContext, ReviewVerdict } from "../types.js"
+import type { PRInfo } from "./coder.js"
 import { agentTurn, emit } from "../transcript.js"
 import { constitutionPrompt } from "../constitution.js"
 
-// ─── Reviewer Agent ───────────────────────────────────────────────────────────
+// ─── Reviewer Agent (Rocky) ───────────────────────────────────────────────────
+// Reviews the PR on GitHub. Posts review comments. Approves or requests changes.
+// All feedback goes through the PR — not just in-memory.
 
 async function getOc(): Promise<OpencodeClient> {
   return getClient()
@@ -15,11 +18,18 @@ let _sessionID: string | null = null
 async function ensureSession(repo: RepoContext): Promise<string> {
   const oc = await getOc()
   if (!_sessionID) {
-    // Deny all tools — reviewer only needs to read the patch text and output JSON.
-    // Without this the model uses file-reading tools and never emits text output.
+    // Deny file tools — reviewer reads the PR diff via gh CLI only.
+    // bash is allowed so it can run gh commands.
     const res = await oc.session.create({
-      title: "Astrophage Reviewer",
-      permission: [{ permission: "*", pattern: "*", action: "deny" }],
+      title: "Astrophage Reviewer — Rocky",
+      permission: [
+        { permission: "bash",   pattern: "*", action: "allow" },
+        { permission: "read",   pattern: "*", action: "deny"  },
+        { permission: "edit",   pattern: "*", action: "deny"  },
+        { permission: "glob",   pattern: "*", action: "deny"  },
+        { permission: "grep",   pattern: "*", action: "deny"  },
+        { permission: "list",   pattern: "*", action: "deny"  },
+      ],
     })
     _sessionID = res.data!.id
 
@@ -28,77 +38,62 @@ async function ensureSession(repo: RepoContext): Promise<string> {
       noReply: true,
       parts: [{
         type: "text",
-        text: `You are the Reviewer agent in the Astrophage agent company.
+        text: `You are Rocky, the Reviewer agent in the Astrophage agent company.
+You are an Eridian engineer. Your job is to review PRs on GitHub using the gh CLI.
 
-## Your task
-Review code patches proposed by the Coder agent for this repository:
+## Repo
 - Remote: ${repo.remoteUrl}
 - Default branch: ${repo.defaultBranch}
-${repo.openPRs?.length ? `- Open PRs: ${repo.openPRs.map(pr => `#${pr.number} ${pr.url} "${pr.title}"`).join(", ")}` : ""}
 
-IMPORTANT: Do NOT use any tools. Do NOT read any files. The patch will be provided in full.
-Just read the patch text and respond with JSON.
+You have access to bash so you can run gh CLI commands.
 
 ${constitutionPrompt()}
 
-## Output format
-Respond with a JSON object in EXACTLY this format — no other text, no markdown fences:
-{
-  "decision": "accept" | "reject",
-  "reason": "<clear explanation>",
-  "violatedRule": "<exact rule text if reject, else omit>",
-  "nonNegotiable": true | false
-}`,
+## How you work
+1. Read the PR diff and description using: gh pr view <number> --patch or gh pr diff <number>
+2. Evaluate the change against the constitution
+3. Post a review using: gh pr review <number> --approve OR gh pr review <number> --request-changes --body "..."
+4. Then output your verdict as JSON (no markdown fences):
+{"decision":"accept"|"reject","reason":"...","violatedRule":"...","nonNegotiable":true|false}
+
+IMPORTANT: Always post a GitHub review comment BEFORE outputting the JSON verdict.
+If rejecting, be specific — explain exactly what must change.`,
       }],
     })
   }
   return _sessionID
 }
 
-export async function reviewPatch(patch: Patch, repo: RepoContext, round: number): Promise<ReviewVerdict> {
+// ─── Review a PR — posts GitHub review, returns verdict ───────────────────────
+
+export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number): Promise<ReviewVerdict> {
   const oc = await getOc()
   const sessionID = await ensureSession(repo)
 
-  emit("reviewer", "turn_start", `Reviewing patch (round ${round})`, round)
-  console.log(`\n[REVIEWER] Reviewing proposed fix for ${patch.file}`)
+  emit("reviewer", "turn_start", `Reviewing PR #${pr.number} (round ${round})`, round)
+  console.log(`\n[REVIEWER] Reviewing PR #${pr.number}: ${pr.url}`)
 
-  const prompt = `Review this proposed code patch.
+  const prompt = `Review this PR and post your GitHub review.
 
-Repo: ${repo.remoteUrl}
-File: ${patch.file}
-Coder's explanation: ${patch.explanation}
+PR: ${pr.url}
+PR number: ${pr.number}
 
-Original code:
-\`\`\`go
-${patch.originalCode}
-\`\`\`
-
-Proposed fix:
-\`\`\`go
-${patch.proposedCode}
-\`\`\`
-
-Apply the constitution and return your verdict as JSON.`
+Steps:
+1. Read the diff: gh pr diff ${pr.number}
+2. Read the PR description: gh pr view ${pr.number}
+3. Apply the constitution to the changes
+4. Post your review on GitHub:
+   - If you approve: gh pr review ${pr.number} --approve --body "<your review comment>"
+   - If you request changes: gh pr review ${pr.number} --request-changes --body "<specific things that must change>"
+5. Output your verdict as a JSON object (last thing you output, no markdown fences):
+{"decision":"accept"|"reject","reason":"...","violatedRule":"...","nonNegotiable":true|false}`
 
   const result = await promptAndWait(oc, {
     sessionID,
     parts: [{ type: "text", text: prompt }],
-    format: {
-      type: "json_schema",
-      schema: {
-        type: "object",
-        properties: {
-          decision: { type: "string", enum: ["accept", "reject"] },
-          reason: { type: "string", description: "Clear explanation of the verdict" },
-          violatedRule: { type: "string", description: "Exact rule text if rejecting" },
-          nonNegotiable: { type: "boolean", description: "Whether the violated rule is non-negotiable" },
-        },
-        required: ["decision", "reason", "nonNegotiable"],
-      },
-    },
   })
 
-  const verdict = parseVerdict(result, round)
+  const verdict = parseVerdict(result.text, round)
 
   const label = verdict.decision === "accept"
     ? `ACCEPT — ${verdict.reason}`
@@ -106,42 +101,54 @@ Apply the constitution and return your verdict as JSON.`
 
   agentTurn("reviewer", `Verdict: ${verdict.decision.toUpperCase()}`, label, round)
   emit("reviewer", "verdict", JSON.stringify(verdict), round)
+  emit("reviewer", "git_action", `PR review posted: ${pr.url}`, round)
+
   return verdict
 }
 
-function parseVerdict(result: { text: string; structured: unknown }, round: number): ReviewVerdict {
-  // Prefer structured output
-  if (result.structured && typeof result.structured === "object") {
-    const s = result.structured as Record<string, unknown>
-    return {
-      decision: (s["decision"] as "accept" | "reject") ?? "reject",
-      reason: (s["reason"] as string) ?? "No reason provided",
-      violatedRule: s["violatedRule"] as string | undefined,
-      nonNegotiable: (s["nonNegotiable"] as boolean) ?? false,
-      round,
-    }
-  }
+// ─── Approve and merge the PR ─────────────────────────────────────────────────
 
-  // Fallback: extract JSON from anywhere in the text (model may wrap in markdown)
-  const text = result.text.trim()
-  // Try raw parse first
+export async function approveAndMergePR(pr: PRInfo, repo: RepoContext): Promise<void> {
+  const oc = await getOc()
+  const sessionID = await ensureSession(repo)
+
+  emit("reviewer", "turn_start", `Merging PR #${pr.number}`, 0)
+  console.log(`\n[REVIEWER] Merging PR: ${pr.url}`)
+
+  await promptAndWait(oc, {
+    sessionID,
+    parts: [{
+      type: "text",
+      text: `Merge this approved PR using:
+gh pr merge ${pr.number} --squash --delete-branch --yes`,
+    }],
+  })
+
+  agentTurn("reviewer", "PR merged", pr.url, 0)
+  emit("reviewer", "git_action", `PR merged: ${pr.url}`, 0)
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseVerdict(text: string, round: number): ReviewVerdict {
   const candidates = [
-    text,
-    // Extract from ```json ... ``` block
+    text.trim(),
     text.match(/```(?:json)?\s*([\s\S]+?)```/)?.[1]?.trim() ?? "",
-    // Extract first {...} block
-    text.match(/(\{[\s\S]+\})/)?.[1]?.trim() ?? "",
+    text.match(/(\{[\s\S]*"decision"[\s\S]*\})/)?.[1]?.trim() ?? "",
+    // Last {...} block in the text
+    [...text.matchAll(/\{[\s\S]*?\}/g)].pop()?.[0] ?? "",
   ]
-  for (const candidate of candidates) {
-    if (!candidate) continue
+
+  for (const c of candidates) {
+    if (!c) continue
     try {
-      const parsed = JSON.parse(candidate)
-      if (parsed.decision) {
+      const p = JSON.parse(c)
+      if (p.decision === "accept" || p.decision === "reject") {
         return {
-          decision: parsed.decision ?? "reject",
-          reason: parsed.reason ?? "No reason provided",
-          violatedRule: parsed.violatedRule,
-          nonNegotiable: parsed.nonNegotiable ?? false,
+          decision: p.decision,
+          reason: p.reason ?? "No reason provided",
+          violatedRule: p.violatedRule,
+          nonNegotiable: p.nonNegotiable ?? false,
           round,
         }
       }
@@ -156,46 +163,6 @@ function parseVerdict(result: { text: string; structured: unknown }, round: numb
   }
 }
 
-/** Approve the PR on GitHub using gh CLI */
-export async function approvePR(prUrl: string): Promise<void> {
-  const oc = await getOc()
-
-  // Create a separate one-shot session with bash allowed for gh CLI
-  const res = await oc.session.create({
-    title: "Astrophage Reviewer — PR Approval",
-    permission: [
-      { permission: "bash", pattern: "*", action: "allow" },
-    ],
-  })
-  const sessionID = res.data!.id
-
-  emit("reviewer", "turn_start", `Approving PR ${prUrl}`, 0)
-  console.log(`\n[REVIEWER] Approving PR: ${prUrl}`)
-
-  await promptAndWait(oc, {
-    sessionID,
-    parts: [{
-      type: "text",
-      text: `You are Rocky, the Reviewer agent. The coder's fix has been approved by your review.
-Now approve the GitHub PR and merge it.
-
-PR URL: ${prUrl}
-
-Run these commands:
-1. gh pr review ${prUrl} --approve --body "Fix looks good. Approving."
-2. gh pr merge ${prUrl} --squash --delete-branch
-
-Output the result of each command.`,
-    }],
-  })
-
-  agentTurn("reviewer", "PR approved and merged", prUrl, 0)
-  emit("reviewer", "git_action", `PR approved and merged: ${prUrl}`, 0)
-
-  // Clean up one-shot session
-  await oc.session.delete({ sessionID }).catch(() => {})
-}
-
 export async function closeReviewerSession() {
   const oc = await getOc()
   if (_sessionID) {
@@ -204,7 +171,6 @@ export async function closeReviewerSession() {
   }
 }
 
-/** Reset before a new pipeline run — ensures a fresh session with clean context */
 export async function resetReviewerSession() {
   await closeReviewerSession()
 }
