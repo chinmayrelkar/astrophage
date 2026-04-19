@@ -171,11 +171,11 @@ export function RunPage() {
 
   useEffect(() => {
     if (!id) return
-    fetch(`/runs/${id}/trace`)
+    fetch(apiUrl(`/runs/${id}/trace`))
       .then((r) => r.ok ? r.json() : null)
       .then((data) => data?.tree ? setTraceTree(data.tree) : null)
       .catch(() => null)
-    fetch(`/runs/${id}/costs`)
+    fetch(apiUrl(`/runs/${id}/costs`))
       .then((r) => r.ok ? r.json() : null)
       .then((data) => data ? setCosts(data) : null)
       .catch(() => null)

@@ -29,14 +29,17 @@ import type { Task, PipelineResult, PMPlan, Spec } from "./types.js"
 // Fallback cap — PM plan.maxRounds always takes precedence when available
 const DEFAULT_MAX_ROUNDS = 3
 
-/** Return the most-recently-completed TurnStats for a given agent+round pair. */
-function latestTurnStats(agent: string, round: number) {
+/** Sum ALL completed TurnStats for a given agent+round pair (agents may take multiple turns). */
+function sumTurnStats(agent: string, round: number) {
   const all = getTokenStats()
-  // Scan in reverse so we always get the last completed turn for this agent/round
-  for (let i = all.length - 1; i >= 0; i--) {
-    if (all[i]!.agent === agent && all[i]!.round === round) return all[i]
+  const matches = all.filter((s) => s.agent === agent && s.round === round)
+  if (matches.length === 0) return undefined
+  return {
+    inputTokens:     matches.reduce((s, t) => s + t.inputTokens, 0),
+    outputTokens:    matches.reduce((s, t) => s + t.outputTokens, 0),
+    estimatedCostUSD: matches.reduce((s, t) => s + t.estimatedCostUSD, 0),
+    durationMs:      matches.reduce((s, t) => s + t.durationMs, 0),
   }
-  return undefined
 }
 
 let _running = false
@@ -80,24 +83,30 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
   let spec: Spec | null = null
   let maxRounds = DEFAULT_MAX_ROUNDS
 
+  const pmSpanId = startSpan(runId, "pm", 0, `Plan task: ${task.title}`, rootSpanId)
   try {
     emit("pm", "turn_start", `Planning task: ${task.title}`, 0)
     plan = await planTask(task)
     maxRounds = plan.maxRounds
+    endSpan(runId, pmSpanId, sumTurnStats("pm", 0))
     emit("pm", "convergence", `Plan ready — maxRounds=${maxRounds}`, 0)
     console.log(`\n[PIPELINE] PM plan: maxRounds=${maxRounds}`)
   } catch (err) {
+    endSpan(runId, pmSpanId, sumTurnStats("pm", 0))
     console.warn(`[PIPELINE] PM agent failed — falling back to default plan: ${err}`)
     emit("orchestrator", "convergence", `PM agent failed, using default plan: ${err}`, 0)
   }
 
   // ── Phase 1: Architect contracts ──────────────────────────────────────────
   if (plan) {
+    const archSpanId = startSpan(runId, "architect", 0, `Derive contracts: ${task.title}`, rootSpanId)
     try {
       emit("architect", "turn_start", `Deriving contracts for: ${task.title}`, 0)
       spec = await deriveContracts(task, plan)
+      endSpan(runId, archSpanId, sumTurnStats("architect", 0))
       emit("architect", "convergence", `Contracts ready — ${spec.fileContracts.length} file(s)`, 0)
     } catch (err) {
+      endSpan(runId, archSpanId, sumTurnStats("architect", 0))
       console.warn(`[PIPELINE] Architect agent failed — proceeding without contracts: ${err}`)
       emit("orchestrator", "convergence", `Architect agent failed: ${err}`, 0)
     }
@@ -128,12 +137,12 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
       if (round === 1) {
         // First round: explore, fix, open PR — with PM focus areas injected
         pr = await proposeAndOpenPR(task, round, coderCtx)
-        endSpan(runId, coderSpanId, latestTurnStats("coder", round))
+        endSpan(runId, coderSpanId, sumTurnStats("coder", round))
         console.log(`\n[PIPELINE] PR opened: ${pr.url}`)
       } else {
         // Subsequent rounds: read review comments, update, force-push
         await iterateOnPRFeedback(task, pr!, round)
-        endSpan(runId, coderSpanId, latestTurnStats("coder", round))
+        endSpan(runId, coderSpanId, sumTurnStats("coder", round))
       }
 
       // ── Tester ────────────────────────────────────────────────────────────
@@ -142,7 +151,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         `Run tests for PR #${pr!.number}`, rootSpanId,
       )
       const testResult = await runTests(pr!, task.repo, round, testerCtx)
-      endSpan(runId, testerSpanId, latestTurnStats("tester", round))
+      endSpan(runId, testerSpanId, sumTurnStats("tester", round))
 
       if (!testResult.passed) {
         const failSummary = testResult.failures.slice(0, 3).join("; ") || "see output"
@@ -172,7 +181,7 @@ export async function runPipeline(task: Task): Promise<PipelineResult> {
         `Review PR #${pr!.number}`, rootSpanId,
       )
       const verdict = await reviewPR(pr!, task.repo, round, reviewerCtx)
-      endSpan(runId, reviewerSpanId, latestTurnStats("reviewer", round))
+      endSpan(runId, reviewerSpanId, sumTurnStats("reviewer", round))
 
       rounds.push({
         number: round,
