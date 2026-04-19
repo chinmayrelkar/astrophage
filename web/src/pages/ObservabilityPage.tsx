@@ -14,18 +14,36 @@ interface RunSummary {
   status: string
   rounds: number
   prUrl?: string
-  events: Array<{ agent: string; type: string; content: string; tokenStats?: TokenStats }>
+  estimatedCostUSD?: number
 }
 
-interface TokenStats {
-  inputTokens: number
-  outputTokens: number
+interface AgentCostRow {
+  agent: string
+  turns: number
+  outputChars: number
+  estimatedTokens: number
   estimatedCostUSD: number
-  durationMs: number
+}
+
+interface ObsSummary {
+  totalRuns: number
+  mergedCount: number
+  unresolvedCount: number
+  runningCount: number
+  completedRuns: number
+  avgDurationMs: number
+  totalCostUSD: number
+  totalTokens: number
+  agentCosts: AgentCostRow[]
+  runs: RunSummary[]
+  cachedAt: string
 }
 
 interface LoopStatus {
   running: boolean
+  paused: boolean
+  pausedAt: string | null
+  pauseReason: string | null
   scoutRunning: boolean
   productRunning: boolean
   watchedRepos: string[]
@@ -36,14 +54,6 @@ interface LoopStatus {
   nextProductAt: string | null
   lastScoutAt: string | null
   lastProductAt: string | null
-}
-
-interface AgentCostRow {
-  agent: string
-  turns: number
-  outputChars: number
-  estimatedTokens: number
-  estimatedCostUSD: number
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,69 +91,20 @@ function timeUntil(iso: string | null): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// ─── Compute cross-run agent costs from event data ────────────────────────────
-
-function computeAgentCosts(runs: RunSummary[]): AgentCostRow[] {
-  const byAgent: Record<string, { turns: number; outputChars: number }> = {}
-  for (const run of runs) {
-    for (const e of (run.events ?? [])) {
-      if (!byAgent[e.agent]) byAgent[e.agent] = { turns: 0, outputChars: 0 }
-      if (e.type === "turn_start") byAgent[e.agent].turns++
-      if (e.type === "token") byAgent[e.agent].outputChars += (e.content?.length ?? 0)
-    }
-  }
-  return Object.entries(byAgent)
-    .filter(([, d]) => d.outputChars > 0 || d.turns > 0)
-    .map(([agent, d]) => {
-      const tokens = Math.round(d.outputChars / 4)
-      return {
-        agent,
-        turns: d.turns,
-        outputChars: d.outputChars,
-        estimatedTokens: tokens,
-        estimatedCostUSD: tokens * 15 / 1_000_000,
-      }
-    })
-    .sort((a, b) => b.estimatedCostUSD - a.estimatedCostUSD)
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function ObservabilityPage() {
   const navigate = useNavigate()
-  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [summary, setSummary] = useState<ObsSummary | null>(null)
   const [loop, setLoop] = useState<LoopStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadRuns = async () => {
-      try {
-        // Fetch the run list (no events)
-        const listRes = await fetch(apiUrl("/runs"))
-        if (!listRes.ok) { setLoading(false); return }
-        const list = (await listRes.json()) as RunSummary[]
-
-        // Fetch full data for each run (with events) for cost computation
-        // Only fetch runs we don't already have events for
-        const full = await Promise.all(
-          list.map(async (r) => {
-            const existing = runs.find((er) => er.id === r.id && (er.events?.length ?? 0) > 0)
-            if (existing && r.status !== "running") return existing
-            try {
-              const res = await fetch(apiUrl(`/runs/${r.id}`))
-              if (!res.ok) return { ...r, events: [] }
-              return (await res.json()) as RunSummary
-            } catch {
-              return { ...r, events: [] }
-            }
-          }),
-        )
-        setRuns(full)
-        setLoading(false)
-      } catch {
-        setLoading(false)
-      }
-    }
+    const loadSummary = () =>
+      fetch(apiUrl("/observability/summary"))
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) { setSummary(d as ObsSummary); setLoading(false) } })
+        .catch(() => setLoading(false))
 
     const loadLoop = () =>
       fetch(apiUrl("/autonomous/status"))
@@ -151,26 +112,19 @@ export function ObservabilityPage() {
         .then((d) => d && setLoop(d as LoopStatus))
         .catch(() => null)
 
-    loadRuns()
+    loadSummary()
     loadLoop()
-    const i1 = setInterval(loadRuns, 15_000)
+    // Summary is cached for 60s on the server — no need to hit faster than that
+    const i1 = setInterval(loadSummary, 60_000)
     const i2 = setInterval(loadLoop, 5_000)
     return () => { clearInterval(i1); clearInterval(i2) }
   }, [])
 
-  const completedRuns = runs.filter((r) => r.status !== "running")
-  const agentCosts = computeAgentCosts(runs)
-  const totalCost = agentCosts.reduce((s, a) => s + a.estimatedCostUSD, 0)
-  const totalTokens = agentCosts.reduce((s, a) => s + a.estimatedTokens, 0)
-  const avgDuration = completedRuns.length > 0
-    ? completedRuns.reduce((s, r) => {
-        if (!r.startedAt || !r.finishedAt) return s
-        return s + (new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime())
-      }, 0) / completedRuns.length
-    : 0
-  const mergedCount = runs.filter((r) => r.status === "merged").length
-  const unresolvedCount = runs.filter((r) => r.status === "unresolved").length
-  const runningCount = runs.filter((r) => r.status === "running").length
+  const s = summary
+  const runs = s?.runs ?? []
+  const agentCosts = s?.agentCosts ?? []
+  const totalCost = s?.totalCostUSD ?? 0
+  const totalTokens = s?.totalTokens ?? 0
 
   return (
     <div style={{
@@ -191,6 +145,11 @@ export function ObservabilityPage() {
         </button>
         <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.15)", letterSpacing: "0.1em" }}>/ OBSERVABILITY</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: "12px", alignItems: "center" }}>
+          {s?.cachedAt && (
+            <span style={{ fontSize: "8px", color: "rgba(255,255,255,0.15)", letterSpacing: "0.08em" }}>
+              cached {timeAgo(s.cachedAt)}
+            </span>
+          )}
           <button onClick={() => navigate("/app")} style={{
             background: "rgba(0,255,135,0.08)", border: "1px solid rgba(0,255,135,0.25)",
             borderRadius: "4px", color: "#00ff87", cursor: "pointer",
@@ -210,18 +169,67 @@ export function ObservabilityPage() {
         <h1 style={{ fontSize: "22px", fontWeight: 900, letterSpacing: "0.06em", color: "white", marginBottom: "8px" }}>
           Observability
         </h1>
-        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)", marginBottom: "40px" }}>
+        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)", marginBottom: "24px" }}>
           Cross-run metrics, cost breakdown, pipeline health, and autonomous loop status.
         </p>
+
+        {/* ── Paused banner (read-only status indicator) ── */}
+        {loop?.paused && (
+          <div style={{
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.4)",
+            borderRadius: "6px",
+            padding: "12px 16px",
+            marginBottom: "24px",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+          }}>
+            <div style={{
+              width: "8px", height: "8px", borderRadius: "50%",
+              background: "#ef4444", boxShadow: "0 0 8px #ef4444",
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#ef4444", letterSpacing: "0.15em" }}>
+                AUTONOMOUS LOOP PAUSED
+              </div>
+              <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.45)", marginTop: "3px" }}>
+                {loop.pausedAt ? `since ${timeAgo(loop.pausedAt)}` : ""}
+                {loop.pauseReason ? ` · ${loop.pauseReason}` : ""}
+                {" · No new Scout/Product cycles or task dispatch. In-flight runs will complete."}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Summary cards ── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "12px", marginBottom: "40px" }}>
           {[
-            { label: "TOTAL RUNS", value: String(runs.length), sub: `${mergedCount} merged, ${unresolvedCount} unresolved${runningCount > 0 ? `, ${runningCount} running` : ""}` },
-            { label: "TOTAL COST", value: `$${totalCost.toFixed(2)}`, sub: `~${totalTokens.toLocaleString()} output tokens` },
-            { label: "AVG DURATION", value: avgDuration > 0 ? fmtDuration(avgDuration) : "—", sub: completedRuns.length > 0 ? `across ${completedRuns.length} completed run${completedRuns.length !== 1 ? "s" : ""}` : "no completed runs" },
-            { label: "QUEUE DEPTH", value: String(loop?.queue.length ?? 0), sub: `${loop?.seenKeyCount ?? 0} issues seen` },
-            { label: "BACKLOG", value: String(loop?.backlogSize ?? 0), sub: loop?.lastProductAt ? `updated ${timeAgo(loop.lastProductAt)}` : "not yet scanned" },
+            {
+              label: "TOTAL RUNS",
+              value: String(s?.totalRuns ?? 0),
+              sub: `${s?.mergedCount ?? 0} merged, ${s?.unresolvedCount ?? 0} unresolved${(s?.runningCount ?? 0) > 0 ? `, ${s!.runningCount} running` : ""}`,
+            },
+            {
+              label: "TOTAL COST",
+              value: `$${totalCost.toFixed(2)}`,
+              sub: `~${totalTokens.toLocaleString()} output tokens`,
+            },
+            {
+              label: "AVG DURATION",
+              value: (s?.avgDurationMs ?? 0) > 0 ? fmtDuration(s!.avgDurationMs) : "—",
+              sub: (s?.completedRuns ?? 0) > 0 ? `across ${s!.completedRuns} completed run${s!.completedRuns !== 1 ? "s" : ""}` : "no completed runs",
+            },
+            {
+              label: "QUEUE DEPTH",
+              value: String(loop?.queue.length ?? 0),
+              sub: `${loop?.seenKeyCount ?? 0} issues seen`,
+            },
+            {
+              label: "BACKLOG",
+              value: String(loop?.backlogSize ?? 0),
+              sub: loop?.lastProductAt ? `updated ${timeAgo(loop.lastProductAt)}` : "not yet scanned",
+            },
           ].map((card) => (
             <div key={card.label} style={{
               background: "rgba(255,255,255,0.02)",
@@ -396,23 +404,17 @@ export function ObservabilityPage() {
             }}>
               {/* Header */}
               <div style={{
-                display: "grid", gridTemplateColumns: "1fr 80px 60px 80px 80px",
+                display: "grid", gridTemplateColumns: "1fr 80px 60px 80px 90px 70px",
                 gap: "8px", padding: "10px 18px",
                 borderBottom: "1px solid rgba(255,255,255,0.06)",
                 fontSize: "8px", letterSpacing: "0.1em", color: "rgba(255,255,255,0.2)",
               }}>
-                <div>TASK</div><div>STATUS</div><div>ROUNDS</div><div>DURATION</div><div>COST (EST.)</div>
+                <div>TASK</div><div>STATUS</div><div>ROUNDS</div><div>DURATION</div><div>COST (EST.)</div><div>PR</div>
               </div>
-              {[...runs].reverse().map((run) => {
+              {runs.map((run) => {
                 const dur = (run.startedAt && run.finishedAt)
                   ? new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
                   : null
-                // Compute cost from events
-                let outChars = 0
-                for (const e of (run.events ?? [])) {
-                  if (e.type === "token") outChars += (e.content?.length ?? 0)
-                }
-                const cost = (outChars / 4) * 15 / 1_000_000
 
                 const statusColor = run.status === "merged" ? "#00ff87"
                   : run.status === "running" ? "#60a5fa"
@@ -423,7 +425,7 @@ export function ObservabilityPage() {
                     key={run.id}
                     onClick={() => navigate(`/run/${run.id}`)}
                     style={{
-                      display: "grid", gridTemplateColumns: "1fr 80px 60px 80px 80px",
+                      display: "grid", gridTemplateColumns: "1fr 80px 60px 80px 90px 70px",
                       gap: "8px", padding: "12px 18px", alignItems: "center",
                       borderBottom: "1px solid rgba(255,255,255,0.04)",
                       cursor: "pointer", transition: "background 0.15s",
@@ -457,7 +459,20 @@ export function ObservabilityPage() {
                       {dur !== null ? fmtDuration(dur) : "—"}
                     </div>
                     <div style={{ fontSize: "10px", color: "#fbbf24" }}>
-                      {cost > 0 ? `$${cost.toFixed(4)}` : "—"}
+                      {(run.estimatedCostUSD ?? 0) > 0 ? `$${(run.estimatedCostUSD ?? 0).toFixed(4)}` : "—"}
+                    </div>
+                    <div style={{ fontSize: "10px" }}>
+                      {run.prUrl ? (
+                        <a
+                          href={run.prUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: "#00ff87", textDecoration: "none", fontSize: "9px" }}
+                        >
+                          VIEW PR
+                        </a>
+                      ) : "—"}
                     </div>
                   </div>
                 )

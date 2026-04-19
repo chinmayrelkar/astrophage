@@ -1,6 +1,6 @@
 {
-  "runAt": "2026-04-19T11:06:13.434Z",
-  "ref": "master@a129fa4",
+  "runAt": "2026-04-19T12:54:32.781Z",
+  "ref": "master@45efc4e",
   "total": 12,
   "passed": 12,
   "failed": 0,
@@ -20,7 +20,7 @@
       "description": "parseVerdict correctly detects a NON-NEGOTIABLE rejection when a hardcoded secret is present",
       "passed": true,
       "detail": "decision: got \"reject\", want \"reject\" → OK | nonNegotiable: got true, want true → OK | violatedRule contains \"hardcoded\": \"No hardcoded secrets, API keys, or client_ids in source code\" → OK",
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "reviewer-reject-negotiable-style",
@@ -52,7 +52,7 @@
       "description": "parseTestResult correctly identifies a PASS when the agent outputs 'ok' and ends with PASS",
       "passed": true,
       "detail": "passed: got true, want true → OK | failures.length: got 0, want 0 → OK",
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "id": "tester-fail-explicit",
@@ -60,7 +60,7 @@
       "description": "parseTestResult correctly identifies a FAIL when go test output contains '--- FAIL'",
       "passed": true,
       "detail": "passed: got false, want false → OK | failures non-empty: 2 failure(s) → OK",
-      "durationMs": 0
+      "durationMs": 1
     },
     {
       "id": "tester-pass-no-test-files",

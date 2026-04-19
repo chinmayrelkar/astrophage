@@ -11,6 +11,16 @@ import { startAutonomousLoop, getLoopStatus } from "./autonomous-loop.js"
 import { loadBacklog } from "./agents/product.js"
 import type { AgentEvent, PipelineStatus, RepoContext, Task } from "./types.js"
 
+// ─── Observability cache (declared early — invalidated from run lifecycle) ───
+
+interface ObsSummaryCache { data: object; builtAt: number }
+let _obsCache: ObsSummaryCache | null = null
+const OBS_CACHE_TTL_MS = 60_000 // 60 s
+
+/** Called at every run lifecycle mutation so the /observability/summary
+ *  aggregate stays near-live without killing the cache on every token event. */
+function invalidateObsCache() { _obsCache = null }
+
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
 const RUNS_DIR = join(homedir(), ".astrophage", "runs")
@@ -66,6 +76,7 @@ function loadPersistedRuns(): RunRecord[] {
             run.status = "unresolved"
             run.finishedAt = run.finishedAt ?? new Date().toISOString()
             persistRun(run)
+            invalidateObsCache()
           }
           return run
         } catch {
@@ -131,6 +142,7 @@ export function startRun(taskId: string, taskTitle: string): RunRecord {
   }
   _currentRun = run
   runs.push(run)
+  invalidateObsCache()
 
   // Persist run record immediately so it survives a crash
   persistRun(run)
@@ -142,7 +154,10 @@ export function startRun(taskId: string, taskTitle: string): RunRecord {
     // Write every event to disk as it arrives — no data loss on restart
     appendEventToDisk(run.id, event)
     // Re-persist the full record every 10 events to keep status/rounds current
-    if (run.events.length % 10 === 0) persistRun(run)
+    if (run.events.length % 10 === 0) {
+      persistRun(run)
+      invalidateObsCache()
+    }
   })
 
   return run
@@ -154,6 +169,7 @@ export function finishRun(status: PipelineStatus, prUrl?: string) {
     _currentRun.finishedAt = new Date().toISOString()
     if (prUrl) _currentRun.prUrl = prUrl
     persistRun(_currentRun)
+    invalidateObsCache()
     // Remove the incremental sidecar — the full JSON is now the source of truth
     try { unlinkSync(join(RUNS_DIR, `${_currentRun.id}.events.ndjson`)) } catch { /* ok */ }
     _currentRun = null
@@ -314,6 +330,81 @@ app.get("/stats", (c) => {
     totalTurns: allStats.length,
     byAgent,
   })
+})
+
+// ─── Observability summary (cached, single-call) ──────────────────────────────
+
+function buildObsSummary() {
+  const completedRuns = runs.filter((r) => r.status !== "running")
+  const totalRuns = runs.length
+  const mergedCount = runs.filter((r) => r.status === "merged").length
+  const unresolvedCount = runs.filter((r) => r.status === "unresolved").length
+  const runningCount = runs.filter((r) => r.status === "running").length
+
+  // Duration
+  const durationsMs = completedRuns
+    .filter((r) => r.finishedAt)
+    .map((r) => new Date(r.finishedAt!).getTime() - new Date(r.startedAt).getTime())
+  const avgDurationMs = durationsMs.length > 0
+    ? durationsMs.reduce((a, b) => a + b, 0) / durationsMs.length
+    : 0
+
+  // Cost + token breakdown by agent AND per-run — derived from stored events
+  const byAgent: Record<string, { agent: string; turns: number; outputChars: number; estimatedTokens: number; estimatedCostUSD: number }> = {}
+  const runCostByRunId: Record<string, number> = {}
+  for (const run of runs) {
+    let runChars = 0
+    for (const e of run.events) {
+      if (!byAgent[e.agent]) byAgent[e.agent] = { agent: e.agent, turns: 0, outputChars: 0, estimatedTokens: 0, estimatedCostUSD: 0 }
+      const a = byAgent[e.agent]!
+      if (e.type === "turn_start") a.turns++
+      if (e.type === "token") {
+        const len = e.content?.length ?? 0
+        a.outputChars += len
+        runChars += len
+      }
+    }
+    const runTokens = Math.round(runChars / 4)
+    runCostByRunId[run.id] = runTokens * 15 / 1_000_000
+  }
+  const agentCosts = Object.values(byAgent)
+    .map((a) => {
+      const tokens = Math.round(a.outputChars / 4)
+      return { ...a, estimatedTokens: tokens, estimatedCostUSD: tokens * 15 / 1_000_000 }
+    })
+    .filter((a) => a.turns > 0 || a.outputChars > 0)
+    .sort((a, b) => b.estimatedCostUSD - a.estimatedCostUSD)
+
+  const totalCost = agentCosts.reduce((s, a) => s + a.estimatedCostUSD, 0)
+  const totalTokens = agentCosts.reduce((s, a) => s + a.estimatedTokens, 0)
+
+  // Run list (no events) — include per-run estimatedCostUSD for the history table
+  const runList = [...runs].reverse().map(({ events: _, ...r }) => ({
+    ...r,
+    estimatedCostUSD: runCostByRunId[r.id] ?? 0,
+  }))
+
+  return {
+    totalRuns,
+    mergedCount,
+    unresolvedCount,
+    runningCount,
+    completedRuns: completedRuns.length,
+    avgDurationMs,
+    totalCostUSD: totalCost,
+    totalTokens,
+    agentCosts,
+    runs: runList,
+    cachedAt: new Date().toISOString(),
+  }
+}
+
+app.get("/observability/summary", (c) => {
+  const now = Date.now()
+  if (!_obsCache || now - _obsCache.builtAt > OBS_CACHE_TTL_MS) {
+    _obsCache = { data: buildObsSummary(), builtAt: now }
+  }
+  return c.json(_obsCache.data)
 })
 
 app.get("/status", (c) => c.json({
