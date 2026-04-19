@@ -7,7 +7,7 @@
  * Usage: npx tsx src/main.ts
  */
 
-import { startServer, startRun, finishRun } from "./server.js"
+import { startServer, startRun, finishRun, setCurrentTask } from "./server.js"
 import { proposeInitialFix, closeCoderSession } from "./agents/coder.js"
 import { reviewPatch, closeReviewerSession } from "./agents/reviewer.js"
 import { roundStart, emit, transcript } from "./transcript.js"
@@ -107,6 +107,7 @@ async function main() {
 
   // Start SSE server so web UI can connect
   await startServer(3001)
+  setCurrentTask({ id: task.id, title: task.title, description: task.description, repo: task.repo })
   startRun(task.id, task.title)
 
   try {

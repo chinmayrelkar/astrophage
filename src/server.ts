@@ -2,7 +2,22 @@ import { Hono } from "hono"
 import { serve } from "@hono/node-server"
 import { streamSSE } from "hono/streaming"
 import { transcript } from "./transcript.js"
-import type { AgentEvent, PipelineStatus } from "./types.js"
+import type { AgentEvent, PipelineStatus, RepoContext } from "./types.js"
+
+// ─── Current task info ────────────────────────────────────────────────────────
+
+export interface TaskInfo {
+  id: string
+  title: string
+  description: string
+  repo: RepoContext
+}
+
+let _currentTask: TaskInfo | null = null
+
+export function setCurrentTask(task: TaskInfo) {
+  _currentTask = task
+}
 
 // ─── Run history ──────────────────────────────────────────────────────────────
 
@@ -66,6 +81,12 @@ app.use("*", async (c, next) => {
 
 // Health
 app.get("/health", (c) => c.json({ status: "ok", service: "astrophage" }))
+
+// Current task
+app.get("/task", (c) => {
+  if (!_currentTask) return c.json(null)
+  return c.json(_currentTask)
+})
 
 // SSE live stream
 app.get("/events", (c) => {
