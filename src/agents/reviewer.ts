@@ -77,18 +77,28 @@ export async function reviewPR(pr: PRInfo, repo: RepoContext, round: number): Pr
 
   const prompt = `Review this PR and post your GitHub review.
 
-PR: ${pr.url}
+PR URL: ${pr.url}
 PR number: ${pr.number}
+Repo: ${repo.remoteUrl}
 
-Steps:
-1. Read the diff: gh pr diff ${pr.number}
-2. Read the PR description: gh pr view ${pr.number}
-3. Apply the constitution to the changes
-4. Post your review on GitHub:
-   - If you approve: gh pr review ${pr.number} --approve --body "<your review comment>"
-   - If you request changes: gh pr review ${pr.number} --request-changes --body "<specific things that must change>"
-5. Output your verdict as a JSON object (last thing you output, no markdown fences):
-{"decision":"accept"|"reject","reason":"...","violatedRule":"...","nonNegotiable":true|false}`
+Run these steps IN ORDER:
+
+STEP 1 — Read the diff:
+gh pr diff ${pr.number} --repo ${repo.remoteUrl.replace(/\.git$/, "")}
+
+STEP 2 — Read the description:
+gh pr view ${pr.number} --repo ${repo.remoteUrl.replace(/\.git$/, "")}
+
+STEP 3 — Apply the constitution. Check every non-negotiable rule.
+
+STEP 4 — Post your review (you MUST run one of these):
+  If approving:   gh pr review ${pr.number} --approve --body "<your comment>"
+  If requesting:  gh pr review ${pr.number} --request-changes --body "<exactly what must change>"
+
+STEP 5 — Output your verdict as the LAST thing you write, as a raw JSON object (no fences):
+{"decision":"accept"|"reject","reason":"...","violatedRule":"...","nonNegotiable":true|false}
+
+IMPORTANT: Base your review ONLY on PR #${pr.number}. Do not reference any other PR.`
 
   const result = await promptAndWait(oc, {
     sessionID,

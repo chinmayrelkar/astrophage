@@ -80,31 +80,52 @@ export async function proposeAndOpenPR(task: Task, round: number): Promise<PRInf
 
 ${task.description}
 
-Do the following in order:
-1. Explore the repo at ${task.repo.localPath} to find the bug
-2. Edit the relevant file(s) to fix it
-3. Create a branch: git checkout -b fix/<short-slug>
-4. Commit: git add -A && git commit -m "fix: <summary>"
-5. Push: git push origin <branch>
-6. Open a PR with gh:
-   gh pr create --title "fix: <title>" --body "<explain the bug and your fix>"
+Do the following steps IN ORDER. Run each bash command and show the output.
 
-After opening the PR, output ONLY this on the last line:
-PR_URL: https://github.com/...`
+STEP 1 — Explore the repo at ${task.repo.localPath} to find the bug. Read relevant files.
+
+STEP 2 — Edit the file(s) to fix the bug.
+
+STEP 3 — Create a branch and commit:
+\`\`\`
+cd ${task.repo.localPath}
+git checkout ${task.repo.defaultBranch}
+git pull
+git checkout -b fix/<short-slug-describing-fix>
+git add -A
+git commit -m "fix: <one line summary>"
+\`\`\`
+
+STEP 4 — Push and open a PR. Run this exact command and show the full output:
+\`\`\`
+cd ${task.repo.localPath}
+git push origin <your-branch>
+gh pr create --title "fix: <title>" --body "<describe the bug and your fix>" 2>&1
+\`\`\`
+
+STEP 5 — The \`gh pr create\` command prints the PR URL as the last line of output.
+Copy that URL exactly and output it on its own line in this exact format:
+NEW_PR_URL: https://github.com/chinmayrelkar/bawarchi/pull/<NUMBER>
+
+The number must be from the PR you JUST created in this session, not any previous PR.`
 
   const result = await promptAndWait(oc, {
     sessionID,
     parts: [{ type: "text", text: prompt }],
   })
 
-  const prUrlMatch = result.text.match(/PR_URL:\s*(https:\/\/github\.com\/\S+)/)
+  // Extract PR URL — must be the NEW_PR_URL marker, not any other URL in the text
+  const prUrlMatch = result.text.match(/NEW_PR_URL:\s*(https:\/\/github\.com\/\S+\/pull\/(\d+))/)
   const prUrl = prUrlMatch?.[1]?.trim()
-  if (!prUrl) throw new Error(`[CODER] Could not extract PR URL from response:\n${result.text.slice(0, 300)}`)
+  const prNumber = prUrlMatch?.[2] ? parseInt(prUrlMatch[2]) : 0
 
-  const prNumberMatch = prUrl.match(/\/pull\/(\d+)/)
-  const prNumber = prNumberMatch ? parseInt(prNumberMatch[1]) : 0
-  const branchMatch = result.text.match(/git(?:\s+push\s+origin\s+|.*checkout\s+-b\s+)(\S+)/)
-  const branch = branchMatch?.[1] ?? "fix/unknown"
+  if (!prUrl || prNumber === 0) {
+    throw new Error(`[CODER] Could not extract NEW_PR_URL from response:\n${result.text.slice(0, 400)}`)
+  }
+
+  // Extract branch name from the response
+  const branchMatch = result.text.match(/git\s+(?:push\s+origin\s+|checkout\s+-b\s+)(fix\/[\w-]+)/)
+  const branch = branchMatch?.[1] ?? `fix/round-${round}`
 
   // Extract patch from text for reviewer context
   const patch = parseCoderResponse(result.text, "unknown")
@@ -131,19 +152,26 @@ export async function iterateOnPRFeedback(
   emit("coder", "git_action", `Reading review comments...`, round)
   console.log(`\n[CODER] Iterating on PR feedback — round ${round}`)
 
-  const prompt = `The reviewer has posted review comments on your PR.
+  const prompt = `The reviewer has requested changes on your PR. Update it.
 
-PR: ${pr.url}
+PR URL: ${pr.url}
+PR number: ${pr.number}
 Branch: ${pr.branch}
+Repo: ${task.repo.localPath}
 
-Do the following:
-1. Read the PR review comments: gh pr view ${pr.number} --comments
-2. Read the PR review: gh pr reviews ${pr.number}
-3. Address ALL the reviewer's concerns by editing the relevant files
-4. Commit the changes: git add -A && git commit -m "fix: address review feedback"
-5. Force-push to update the PR: git push origin ${pr.branch} --force-with-lease
+Run these steps:
+\`\`\`
+cd ${task.repo.localPath}
+git checkout ${pr.branch}
+gh pr view ${pr.number} --comments
+\`\`\`
 
-Do not open a new PR — update the existing one.`
+Read every review comment carefully. Then:
+1. Edit the relevant files to address ALL concerns
+2. Commit: git add -A && git commit -m "fix: address review feedback round ${round}"
+3. Force-push: git push origin ${pr.branch} --force-with-lease
+
+Do NOT open a new PR. Do NOT change the branch name. Update PR #${pr.number} only.`
 
   await promptAndWait(oc, {
     sessionID,
